@@ -35,6 +35,9 @@ class WorkerClient:
         if path == "/domain/replication": return demo.REPLICATION
         if path == "/domain/trusts": return demo.TRUSTS
         if path == "/domain/sites": return demo.SITES
+        if path == "/domain/subnets": return demo.SUBNETS
+        if path == "/domain/password-policy": return demo.PASSWORD_POLICY
+        if path == "/domain/password-policies": return demo.FINE_GRAINED_POLICIES
         if path == "/ad/users" and method == "GET":
             q = (params.get("q") or "").lower()
             return [x for x in demo.USERS if not q or q in x["samAccountName"].lower() or q in x["displayName"].lower() or q in x.get("mail","").lower()]
@@ -48,7 +51,8 @@ class WorkerClient:
             return demo.GROUP_MEMBERS.get(name, [])
         if path == "/ad/computers" and method == "GET": return demo.COMPUTERS
         if path == "/ad/ous" and method == "GET": return demo.OUS
-        if path == "/dns/zones": return demo.DNS_ZONES
+        if path == "/ad/deleted" and method == "GET": return demo.DELETED_OBJECTS
+        if path == "/dns/zones" and method == "GET": return demo.DNS_ZONES
         if path == "/dns/records" and method == "GET":
             zone = params.get("zone")
             return [x for x in demo.DNS if not zone or x["zone"] == zone]
@@ -61,6 +65,7 @@ class WorkerClient:
             return [x for x in demo.DHCP_RESERVATIONS if not scope or x["scopeId"] == scope]
         if path == "/gpo" and method == "GET": return demo.GPOS
         if path == "/gpo/links": return demo.GPO_LINKS
+        if path.startswith("/gpo/") and path.endswith("/permissions"): return demo.GPO_PERMISSIONS
         if path.startswith("/gpo/") and path.endswith("/report"):
             return {"displayName":"Endpoint Security Baseline","computerEnabled":True,"userEnabled":True,"links":demo.GPO_LINKS,"note":"Demo report"}
         return {"ok": True, "demo": True}
