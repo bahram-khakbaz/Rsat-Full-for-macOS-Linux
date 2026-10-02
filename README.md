@@ -53,6 +53,7 @@ See [Architecture](docs/ARCHITECTURE.md) for the trust boundaries and design rat
 ```bash
 git clone https://github.com/bahram-khakbaz/Rsat-Full-for-macOS-Linux.git
 cd Rsat-Full-for-macOS-Linux
+chmod +x scripts/*.sh
 ./scripts/macos-bootstrap.sh
 ```
 
