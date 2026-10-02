@@ -57,3 +57,9 @@ GPOS = [
     {"displayName":"Endpoint Security Baseline","id":"demo-2","status":"AllSettingsEnabled","owner":"EXAMPLE\\Domain Admins","modified":"2026-09-27T12:30:00Z"},
 ]
 GPO_LINKS = [{"displayName":"Endpoint Security Baseline","target":"OU=IT,OU=Users,DC=example,DC=local","enabled":True,"enforced":False,"order":1}]
+
+PASSWORD_POLICY = {"minPasswordLength":12,"maxPasswordAgeDays":90,"minPasswordAgeDays":1,"passwordHistoryCount":24,"complexityEnabled":True,"lockoutThreshold":5,"lockoutDurationMinutes":30}
+FINE_GRAINED_POLICIES = [{"name":"Privileged-Accounts","precedence":10,"minPasswordLength":16,"maxPasswordAgeDays":45,"lockoutThreshold":5}]
+SUBNETS = [{"name":"10.20.0.0/24","site":"HQ"},{"name":"10.30.0.0/24","site":"HQ"},{"name":"10.40.0.0/24","site":"DR"}]
+DELETED_OBJECTS = [{"name":"Former User","objectClass":"user","lastKnownParent":"OU=Users,DC=example,DC=local","deletedAt":"2026-09-29T12:00:00Z","objectGuid":"11111111-1111-1111-1111-111111111111"}]
+GPO_PERMISSIONS = [{"trustee":"EXAMPLE\\Domain Admins","type":"Group","permission":"GpoEditDeleteModifySecurity","inherited":False},{"trustee":"Authenticated Users","type":"WellKnownGroup","permission":"GpoApply","inherited":False}]
