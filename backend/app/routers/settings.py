@@ -7,6 +7,7 @@ from ..auth import Principal, require
 from ..config import settings
 from ..db import DomainControllerConfig, SiteConfig, SystemSetting, get_db
 from ..runtime_config import get_runtime_config
+from ..secret_store import encrypt_secret
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -68,7 +69,7 @@ def save_settings(body: SettingsBody, principal: Principal = Depends(require("se
     _upsert(db, "demo_mode", "true" if body.demo_mode else "false")
     _upsert(db, "worker_url", body.worker_url.strip())
     if body.worker_token is not None and body.worker_token.strip():
-        _upsert(db, "worker_token", body.worker_token.strip())
+        _upsert(db, "worker_token", encrypt_secret(body.worker_token.strip()))
 
     db.query(DomainControllerConfig).delete()
     db.query(SiteConfig).delete()
