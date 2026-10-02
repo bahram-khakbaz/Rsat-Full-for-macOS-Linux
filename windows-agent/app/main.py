@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from .config import settings
 from .runner import run_ps
-from .routers import ad, domain, gpo, network
+from .routers import ad, domain, gpo, network, admin
 
 app = FastAPI(title="RSAT Windows Worker", version="0.3.0")
 
@@ -20,6 +20,7 @@ app.include_router(domain.router)
 app.include_router(ad.router)
 app.include_router(network.router)
 app.include_router(gpo.router)
+app.include_router(admin.router)
 
 @app.get("/health")
 def health():
