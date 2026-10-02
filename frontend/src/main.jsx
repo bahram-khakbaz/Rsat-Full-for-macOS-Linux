@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client'
 import {
   Activity,Archive,Box,ChevronDown,ChevronRight,Command,Computer,Database,Download,FileClock,Filter,Folder,FolderTree,
   Globe2,Group,HardDrive,KeyRound,Link2,LockKeyhole,LogOut,MoreHorizontal,Network,Plus,RefreshCw,
-  Search,Server,ShieldCheck,Terminal,Trash2,UnlockKeyhole,Upload,UserRoundCog,Users,Wifi
+  Search,Server,ShieldCheck,SlidersHorizontal,Terminal,Trash2,UnlockKeyhole,Upload,UserRoundCog,Users,Wifi
 } from 'lucide-react'
 import './styles.css'
 
@@ -20,6 +20,7 @@ const nav=[
   ['dhcp','8','DHCP',Network],
   ['gpo','9','Group Policy',ShieldCheck],
   ['audit','0','Audit Log',FileClock],
+  ['settings','S','Settings',SlidersHorizontal],
 ]
 
 async function api(path,init={}){
@@ -121,6 +122,7 @@ function DirectoryTree({section,setSection,shell}){
       <TreeItem icon={Globe2} label="DNS" active={section==='dns'} onClick={()=>setSection('dns')}/>
       <TreeItem icon={Network} label="DHCP" active={section==='dhcp'} onClick={()=>setSection('dhcp')}/>
       <TreeItem icon={ShieldCheck} label="Group Policy" active={section==='gpo'} onClick={()=>setSection('gpo')}/>
+      <TreeItem icon={SlidersHorizontal} label="Settings" active={section==='settings'} onClick={()=>setSection('settings')}/>
     </div>
   </aside>
 }
@@ -431,6 +433,155 @@ function GPOPage({notify}){
   </div>
 }
 
+function SettingsPage({notify}){
+  const blankDc=()=>({name:'',host:'',ip:'',enabled:true,notes:''})
+  const blankSite=()=>({name:'',code:'',description:'',dcs:[blankDc(),blankDc()]})
+  const[cfg,setCfg]=useState({demo_mode:true,worker_url:'',worker_token:'',worker_token_configured:false,sites:[]})
+  const[loading,setLoading]=useState(true),[busy,setBusy]=useState(''),[tests,setTests]=useState({}),[workerTest,setWorkerTest]=useState(null)
+
+  async function load(){
+    setLoading(true)
+    try{
+      const r=await api('/api/settings')
+      setCfg({...r,worker_token:''})
+    }catch(e){notify(e.message,'bad')}
+    finally{setLoading(false)}
+  }
+  useEffect(()=>{load()},[])
+
+  function updateSite(si,key,value){
+    const sites=cfg.sites.map((s,i)=>i===si?{...s,[key]:value}:s)
+    setCfg({...cfg,sites})
+  }
+  function updateDc(si,di,key,value){
+    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.map((d,j)=>j===di?{...d,[key]:value}:d)}:s)
+    setCfg({...cfg,sites})
+  }
+  function addSite(){setCfg({...cfg,sites:[...cfg.sites,blankSite()]})}
+  function removeSite(si){setCfg({...cfg,sites:cfg.sites.filter((_,i)=>i!==si)})}
+  function addDc(si){
+    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:[...s.dcs,blankDc()]}:s)
+    setCfg({...cfg,sites})
+  }
+  function removeDc(si,di){
+    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.filter((_,j)=>j!==di)}:s)
+    setCfg({...cfg,sites})
+  }
+  async function save(){
+    setBusy('save')
+    try{
+      await api('/api/settings',{method:'PUT',body:JSON.stringify({
+        demo_mode:cfg.demo_mode,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,
+        sites:cfg.sites.map(s=>({name:s.name,code:s.code||'',description:s.description||'',dcs:s.dcs.map(d=>({name:d.name,host:d.host,ip:d.ip||'',enabled:d.enabled!==false,notes:d.notes||''}))}))
+      })})
+      notify('SETTINGS SAVED — ACTIVE WITHOUT RESTART','ok')
+      await load()
+    }catch(e){notify(e.message,'bad')}finally{setBusy('')}
+  }
+  async function testWorker(){
+    setBusy('worker')
+    try{
+      const r=await api('/api/settings/test-worker',{method:'POST',body:JSON.stringify({
+        demo_mode:cfg.demo_mode,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,sites:[]
+      })})
+      setWorkerTest(r)
+      notify('WINDOWS WORKER CONNECTION OK','ok')
+    }catch(e){setWorkerTest({ok:false,error:e.message});notify(e.message,'bad')}finally{setBusy('')}
+  }
+  async function discover(){
+    setBusy('discover')
+    try{
+      const rows=await api('/api/settings/discover-dcs',{method:'POST'})
+      const grouped={}
+      for(const dc of rows){
+        const site=dc.site||'Unknown'
+        if(!grouped[site]) grouped[site]=[]
+        grouped[site].push({name:dc.name||'',host:dc.host||'',ip:dc.ip||'',enabled:dc.enabled!==false,notes:dc.globalCatalog?'Global Catalog':''})
+      }
+      const sites=Object.entries(grouped).map(([name,dcs])=>({name,code:name.toUpperCase().replace(/[^A-Z0-9]+/g,'-').slice(0,20),description:'Discovered from Active Directory',dcs}))
+      setCfg({...cfg,sites})
+      notify('DOMAIN CONTROLLERS DISCOVERED — REVIEW AND SAVE','ok')
+    }catch(e){notify(e.message,'bad')}finally{setBusy('')}
+  }
+  async function testDc(si,di){
+    const dc=cfg.sites[si].dcs[di]
+    if(!dc.host){notify('DC HOST/FQDN IS REQUIRED','bad');return}
+    const key=si+'-'+di
+    setTests({...tests,[key]:{loading:true}})
+    try{
+      const r=await api('/api/settings/test-dc',{method:'POST',body:JSON.stringify({host:dc.host})})
+      setTests(x=>({...x,[key]:r}))
+      notify((r.ok?'DC REACHABLE: ':'DC CHECK FAILED: ')+dc.host,r.ok?'ok':'bad')
+    }catch(e){setTests(x=>({...x,[key]:{ok:false,error:e.message}}));notify(e.message,'bad')}
+  }
+
+  const totalDcs=cfg.sites.reduce((n,s)=>n+s.dcs.length,0)
+  const activeDcs=cfg.sites.reduce((n,s)=>n+s.dcs.filter(d=>d.enabled!==false).length,0)
+  if(loading)return <div className="loading">LOADING SYSTEM CONFIGURATION...</div>
+  return <div className="settings-page">
+    <section className="window-frame settings-connection">
+      <div className="window-title"><span>CONNECTION PROFILE</span><span>CONFIGURATION</span></div>
+      <div className="settings-summary">
+        <div><span>MODE</span><b>{cfg.demo_mode?'DEMO':'PRODUCTION'}</b></div>
+        <div><span>SITES</span><b>{cfg.sites.length}</b></div>
+        <div><span>DOMAIN CONTROLLERS</span><b>{totalDcs}</b></div>
+        <div><span>ENABLED DCS</span><b>{activeDcs}</b></div>
+      </div>
+      <div className="connection-config">
+        <label className="settings-check"><input type="checkbox" checked={cfg.demo_mode} onChange={e=>setCfg({...cfg,demo_mode:e.target.checked})}/><span>DEMO MODE</span><small>Disable this to use the real Windows RSAT worker.</small></label>
+        <label><span>WINDOWS WORKER URL</span><input value={cfg.worker_url||''} onChange={e=>setCfg({...cfg,worker_url:e.target.value})} placeholder="http://windows-management-host:8765"/></label>
+        <label><span>WORKER TOKEN</span><input type="password" value={cfg.worker_token||''} onChange={e=>setCfg({...cfg,worker_token:e.target.value})} placeholder={cfg.worker_token_configured?'••••••••  token already configured':'enter worker token'}/><small>{cfg.worker_token_configured?'Leave blank to keep the saved encrypted token.':'Token is encrypted before database storage.'}</small></label>
+        <div className="connection-buttons">
+          <Button icon={Wifi} onClick={testWorker} disabled={busy==='worker'}>{busy==='worker'?'TESTING...':'TEST WORKER'}</Button>
+          <Button icon={Search} onClick={discover} disabled={busy==='discover'}>{busy==='discover'?'DISCOVERING...':'DISCOVER DCS FROM AD'}</Button>
+          <Button icon={Download} kind="primary" onClick={save} disabled={busy==='save'}>{busy==='save'?'SAVING...':'SAVE SETTINGS'}</Button>
+        </div>
+      </div>
+      {workerTest&&<div className={'connection-result '+(workerTest.ok?'ok':'bad')}>
+        <b>{workerTest.ok?'WORKER ONLINE':'WORKER ERROR'}</b>
+        <span>{workerTest.ok?JSON.stringify(workerTest.worker):workerTest.error}</span>
+      </div>}
+    </section>
+
+    <section className="window-frame sites-config">
+      <div className="window-title"><span>SITE / DOMAIN CONTROLLER MATRIX</span><span>{cfg.sites.length} SITES / {totalDcs} DCS</span></div>
+      <div className="sites-toolbar">
+        <div><b>MULTI-SITE DIRECTORY TOPOLOGY</b><span>Each site can contain two or more domain controllers. Use FQDN whenever possible.</span></div>
+        <Button icon={Plus} onClick={addSite}>ADD SITE</Button>
+      </div>
+      <div className="site-list">
+        {!cfg.sites.length&&<div className="empty">NO SITES CONFIGURED — ADD A SITE OR DISCOVER DCS FROM ACTIVE DIRECTORY</div>}
+        {cfg.sites.map((site,si)=><section className="site-card" key={si}>
+          <div className="site-head">
+            <div className="site-fields">
+              <label><span>SITE NAME</span><input value={site.name||''} onChange={e=>updateSite(si,'name',e.target.value)} placeholder="Site name"/></label>
+              <label><span>CODE</span><input value={site.code||''} onChange={e=>updateSite(si,'code',e.target.value)} placeholder="HQ"/></label>
+              <label className="site-description"><span>DESCRIPTION</span><input value={site.description||''} onChange={e=>updateSite(si,'description',e.target.value)} placeholder="Optional description"/></label>
+            </div>
+            <div className="site-tools"><span>{site.dcs.length} DC</span><Button icon={Plus} onClick={()=>addDc(si)}>ADD DC</Button><Button icon={Trash2} kind="danger" onClick={()=>removeSite(si)}>REMOVE SITE</Button></div>
+          </div>
+          <div className="dc-table">
+            <div className="dc-header"><span>ENABLED</span><span>DC NAME</span><span>HOST / FQDN</span><span>IP ADDRESS</span><span>NOTES</span><span>HEALTH</span><span>ACTIONS</span></div>
+            {site.dcs.map((dc,di)=>{
+              const result=tests[si+'-'+di]
+              return <div className="dc-row" key={di}>
+                <label className="dc-enabled"><input type="checkbox" checked={dc.enabled!==false} onChange={e=>updateDc(si,di,'enabled',e.target.checked)}/></label>
+                <input value={dc.name||''} onChange={e=>updateDc(si,di,'name',e.target.value)} placeholder="DC01"/>
+                <input value={dc.host||''} onChange={e=>updateDc(si,di,'host',e.target.value)} placeholder="dc01.domain.local"/>
+                <input value={dc.ip||''} onChange={e=>updateDc(si,di,'ip',e.target.value)} placeholder="10.x.x.x"/>
+                <input value={dc.notes||''} onChange={e=>updateDc(si,di,'notes',e.target.value)} placeholder="GC / primary / notes"/>
+                <div className="dc-health">{!result?<span className="health unknown">NOT TESTED</span>:result.loading?<span className="health unknown">TESTING</span>:<span className={'health '+(result.ok?'good':'bad')}>{result.ok?'ONLINE':'FAILED'}</span>}{result&&result.ok&&<small>LDAP {result.ldap?'✓':'×'} · KRB {result.kerberos?'✓':'×'} · GC {result.globalCatalog?'✓':'×'}</small>}</div>
+                <div className="dc-actions"><button title="Test DC" onClick={()=>testDc(si,di)}><Activity size={13}/></button><button title="Remove DC" onClick={()=>removeDc(si,di)}><Trash2 size={13}/></button></div>
+              </div>
+            })}
+          </div>
+        </section>)}
+      </div>
+      <div className="settings-footer"><span>Changes are stored in PostgreSQL and become active immediately after save.</span><Button icon={Download} kind="primary" onClick={save} disabled={busy==='save'}>SAVE ALL CHANGES</Button></div>
+    </section>
+  </div>
+}
+
 function AuditPage({notify}){
   const[rows,setRows]=useState([])
   async function load(){try{setRows(await api('/api/audit?limit=300'))}catch(e){notify(e.message,'bad')}}
@@ -447,7 +598,7 @@ function App(){
     setShell({summary:val(0),controllers:val(1)||[],replication:val(2)||[],ous:val(3)||[],audit:val(4)||[],health:val(5)})
   }
   useEffect(()=>{api('/api/auth/me').then(setMe).catch(()=>{});refreshShell();const tick=setInterval(()=>setClock(new Date()),1000);const poll=setInterval(refreshShell,30000);return()=>{clearInterval(tick);clearInterval(poll)}},[])
-  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage})[section]||Overview,[section])
+  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage,settings:SettingsPage})[section]||Overview,[section])
   const domain=(shell.summary?.domain||'DIRECTORY.LOCAL').toUpperCase(),dc=shell.controllers?.[0]?.name||'—'
   return <div className="admin-desktop">
     <header className="app-titlebar">
