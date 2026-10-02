@@ -66,6 +66,22 @@ def read_settings(_: Principal = Depends(require("settings.read")), db: Session 
 
 @router.put("")
 def save_settings(body: SettingsBody, principal: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):
+    site_names = []
+    dc_hosts = []
+    for site in body.sites:
+        name = site.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Every site must have a name")
+        site_names.append(name.lower())
+        for dc in site.dcs:
+            if not dc.name.strip() or not dc.host.strip():
+                raise HTTPException(status_code=400, detail=f"Every DC in site {name} requires a name and host/FQDN")
+            dc_hosts.append(dc.host.strip().lower())
+    if len(site_names) != len(set(site_names)):
+        raise HTTPException(status_code=400, detail="Duplicate site names are not allowed")
+    if len(dc_hosts) != len(set(dc_hosts)):
+        raise HTTPException(status_code=400, detail="A domain controller host/FQDN can only belong to one site")
+
     _upsert(db, "demo_mode", "true" if body.demo_mode else "false")
     _upsert(db, "worker_url", body.worker_url.strip())
     if body.worker_token is not None and body.worker_token.strip():
@@ -99,7 +115,7 @@ async def test_worker(body: SettingsBody, _: Principal = Depends(require("settin
         raise HTTPException(status_code=400, detail="Worker URL is required")
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.get(f"{url}/health", headers={"Authorization": f"Bearer {token}"})
+            response = await client.get(f"{url}/admin/ping", headers={"Authorization": f"Bearer {token}"})
         if response.status_code >= 400:
             raise HTTPException(status_code=502, detail=f"Worker returned HTTP {response.status_code}")
         return {"ok": True, "worker": response.json()}
