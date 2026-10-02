@@ -24,7 +24,7 @@ if ($envText -notmatch '(?m)^AGENT_TOKEN=(.+)$' -or $Matches[1].Trim() -in @('',
   } else {
     $envText += [Environment]::NewLine + "AGENT_TOKEN=$secret" + [Environment]::NewLine
   }
-  Set-Content '.env' $envText -Encoding UTF8
+  Set-Content '.env' $envText -Encoding ASCII
 }
 
 $pairingCode = (New-RandomSecret 9).Substring(0,12).ToUpperInvariant()
