@@ -10,10 +10,20 @@ security = HTTPBearer(auto_error=False)
 
 ROLE_PERMISSIONS = {
     "admin": {"*"},
-    "helpdesk": {"ad.read", "ad.unlock", "ad.password", "ad.enable_disable", "group.read", "audit.read"},
-    "network": {"dns.read", "dns.write", "dhcp.read", "dhcp.write", "audit.read"},
-    "auditor": {"ad.read", "group.read", "computer.read", "ou.read", "dns.read", "dhcp.read", "gpo.read", "audit.read"},
-    "read_only": {"ad.read", "group.read", "computer.read", "ou.read", "dns.read", "dhcp.read", "gpo.read"},
+    "helpdesk": {
+        "domain.read", "ad.read", "ad.create", "ad.update", "ad.unlock", "ad.password",
+        "ad.enable_disable", "group.read", "group.membership", "computer.read", "ou.read", "audit.read"
+    },
+    "network": {"domain.read", "dns.read", "dns.write", "dhcp.read", "dhcp.write", "audit.read"},
+    "gpo_admin": {"domain.read", "ad.read", "ou.read", "gpo.read", "gpo.write", "audit.read"},
+    "auditor": {
+        "domain.read", "ad.read", "group.read", "computer.read", "ou.read",
+        "dns.read", "dhcp.read", "gpo.read", "audit.read"
+    },
+    "read_only": {
+        "domain.read", "ad.read", "group.read", "computer.read", "ou.read",
+        "dns.read", "dhcp.read", "gpo.read"
+    },
 }
 
 class Principal(BaseModel):
