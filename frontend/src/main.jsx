@@ -16,10 +16,11 @@ const nav=[
   ['groups','03','GROUPS',Group],
   ['computers','04','COMPUTERS',Computer],
   ['ous','05','ORGANIZATIONAL UNITS',FolderTree],
-  ['dns','06','DNS',Globe2],
-  ['dhcp','07','DHCP',Network],
-  ['gpo','08','GROUP POLICY',ShieldCheck],
-  ['audit','09','AUDIT LOG',FileClock],
+  ['recycle','06','RECYCLE BIN',Archive],
+  ['dns','07','DNS',Globe2],
+  ['dhcp','08','DHCP',Network],
+  ['gpo','09','GROUP POLICY',ShieldCheck],
+  ['audit','10','AUDIT LOG',FileClock],
 ]
 
 async function api(path,init={}){
@@ -109,17 +110,24 @@ function Overview({notify}){
 }
 
 function Domain({notify}){
-  const[state,setState]=useState({summary:null,controllers:[],replication:[],trusts:[],sites:[]}),[loading,setLoading]=useState(true)
-  async function load(){setLoading(true);try{const[s,c,r,t,si]=await Promise.all(['/summary','/controllers','/replication','/trusts','/sites'].map(x=>api('/api/domain'+x)));setState({summary:s,controllers:c,replication:r,trusts:t,sites:si})}catch(e){notify(e.message,'bad')}finally{setLoading(false)}}
+  const[state,setState]=useState({summary:null,controllers:[],replication:[],trusts:[],sites:[],subnets:[],policy:null,fgpp:[]}),[loading,setLoading]=useState(true)
+  async function load(){setLoading(true);try{
+    const[s,c,r,t,si,sn,p,fp]=await Promise.all(['/summary','/controllers','/replication','/trusts','/sites','/subnets','/password-policy','/password-policies'].map(x=>api('/api/domain'+x)))
+    setState({summary:s,controllers:c,replication:r,trusts:t,sites:si,subnets:sn,policy:p,fgpp:fp})
+  }catch(e){notify(e.message,'bad')}finally{setLoading(false)}}
   useEffect(()=>{load()},[])
   if(loading)return <div className="loading">QUERYING DOMAIN CONTROLLERS...</div>
-  const s=state.summary||{}
+  const s=state.summary||{},p=state.policy||{}
   return <div className="stack">
     <Panel title="DOMAIN / FOREST IDENTITY" code="ROOT" actions={<Button icon={RefreshCw} onClick={load}>REFRESH</Button>}><KV items={[['DOMAIN',s.domain],['FOREST',s.forest],['DOMAIN MODE',s.domainMode],['FOREST MODE',s.forestMode],['RECYCLE BIN',s.recycleBin?'ENABLED':'DISABLED']]}/></Panel>
     <Panel title="DOMAIN CONTROLLERS" code="DC"><Table rows={state.controllers} rowKey="name" cols={[{key:'name',label:'NAME'},{key:'site',label:'SITE'},{key:'ipv4',label:'IPV4'},{key:'os',label:'OS'},{key:'globalCatalog',label:'GC',render:v=><Status ok={v}>{v?'YES':'NO'}</Status>}]} /></Panel>
     <div className="grid-2">
+      <Panel title="DEFAULT DOMAIN PASSWORD POLICY" code="PASS"><KV items={[['MIN LENGTH',p.minPasswordLength],['MAX AGE / DAYS',p.maxPasswordAgeDays],['HISTORY',p.passwordHistoryCount],['COMPLEXITY',p.complexityEnabled?'ENABLED':'DISABLED'],['LOCKOUT THRESHOLD',p.lockoutThreshold],['LOCKOUT DURATION / MIN',p.lockoutDurationMinutes]]}/></Panel>
+      <Panel title="FINE-GRAINED PASSWORD POLICIES" code="FGPP"><Table rows={state.fgpp} rowKey="name" cols={[{key:'name',label:'POLICY'},{key:'precedence',label:'PRECEDENCE'},{key:'minPasswordLength',label:'MIN LEN'},{key:'maxPasswordAgeDays',label:'MAX AGE'},{key:'lockoutThreshold',label:'LOCKOUT'}]} /></Panel>
+    </div>
+    <div className="grid-2">
       <Panel title="TRUSTS" code="TRST"><Table rows={state.trusts} rowKey="name" cols={[{key:'name',label:'TRUST'},{key:'direction',label:'DIRECTION'},{key:'type',label:'TYPE'},{key:'transitive',label:'TRANSITIVE',render:v=><Status ok={v}>{v?'YES':'NO'}</Status>}]} /></Panel>
-      <Panel title="SITES" code="SITE"><Table rows={state.sites} rowKey="name" cols={[{key:'name',label:'SITE'},{key:'subnets',label:'SUBNETS'}]} /></Panel>
+      <Panel title="SITES / SUBNETS" code="SITE"><Table rows={state.sites} rowKey="name" cols={[{key:'name',label:'SITE'},{key:'subnets',label:'SUBNETS'}]} /><div className="subsection"><span className="eyebrow">SUBNET DIRECTORY</span>{state.subnets.map(x=><div className="mini-row" key={x.name}><Wifi size={13}/><span>{x.name}</span><small>{x.site||'UNASSIGNED'}</small></div>)}</div></Panel>
     </div>
     <Panel title="REPLICATION PARTNERS" code="REPL"><Table rows={state.replication} rowKey="partner" cols={[{key:'server',label:'SERVER'},{key:'partner',label:'PARTNER'},{key:'lastSuccess',label:'LAST SUCCESS'},{key:'failures',label:'FAILURES'},{key:'status',label:'STATE',render:v=><Status ok={v==='Healthy'}>{v}</Status>}]} /></Panel>
   </div>
@@ -214,16 +222,32 @@ function OUsPage({notify}){
   </div>
 }
 
+function RecyclePage({notify}){
+  const[rows,setRows]=useState([]),[sel,setSel]=useState(null),[modal,setModal]=useState(null)
+  async function load(){try{setRows(await api('/api/ad/deleted'))}catch(e){notify(e.message,'bad')}}
+  useEffect(()=>{load()},[])
+  async function restore(v){await api('/api/ad/deleted/restore',{method:'POST',body:JSON.stringify({object_guid:sel.objectGuid,target_path:v.target_path||''})});notify('OBJECT RESTORED','ok');setSel(null);load()}
+  return <div className="split"><Panel title="ACTIVE DIRECTORY RECYCLE BIN" code="RCY" actions={<Button icon={RefreshCw} onClick={load}>REFRESH</Button>}><Table rows={rows} rowKey="objectGuid" selectedKey={sel?.objectGuid} onRow={setSel} cols={[{key:'name',label:'DELETED OBJECT'},{key:'objectClass',label:'CLASS'},{key:'lastKnownParent',label:'LAST KNOWN PARENT'},{key:'deletedAt',label:'DELETED AT'}]}/></Panel>
+  <Panel title="RESTORE INSPECTOR" code="OBJ" className="inspector">{sel?<><div className="object-head"><div className="avatar"><Archive/></div><div><h3>{sel.name}</h3><p>{sel.objectGuid}</p></div></div><KV items={[['CLASS',sel.objectClass],['LAST KNOWN PARENT',sel.lastKnownParent],['DELETED AT',sel.deletedAt]]}/><div className="action-grid"><Button icon={RefreshCw} kind="primary" onClick={()=>setModal('restore')}>RESTORE OBJECT</Button></div></>:<div className="empty">SELECT A DELETED OBJECT</div>}</Panel>
+  {modal==='restore'&&sel&&<Modal title={'RESTORE / '+sel.name} subtitle="Leave target empty to restore to last known parent, or provide a different DN." fields={[{name:'target_path',label:'OPTIONAL TARGET DN'}]} onClose={()=>setModal(null)} onSubmit={restore}/>}
+  </div>
+}
+
 function DNSPage({notify}){
   const[zones,setZones]=useState([]),[zone,setZone]=useState(''),[records,setRecords]=useState([]),[sel,setSel]=useState(null),[modal,setModal]=useState(null)
-  async function loadZones(){const z=await api('/api/dns/zones');setZones(z);if(!zone&&z[0])setZone(z[0].name)}
+  async function loadZones(){const z=await api('/api/dns/zones');setZones(z);if(!zone&&z[0])setZone(z[0].name);if(zone&&!z.some(x=>x.name===zone))setZone(z[0]?.name||'')}
   async function loadRecords(){try{setRecords(await api('/api/dns/records'+(zone?'?zone='+enc(zone):'')))}catch(e){notify(e.message,'bad')}}
   useEffect(()=>{loadZones().catch(e=>notify(e.message,'bad'))},[])
   useEffect(()=>{if(zone)loadRecords()},[zone])
   async function create(v){await api('/api/dns/records',{method:'POST',body:JSON.stringify(v)});notify('DNS RECORD CREATED','ok');loadRecords()}
   async function del(){await api('/api/dns/records/delete',{method:'POST',body:JSON.stringify(sel)});notify('DNS RECORD REMOVED','ok');setSel(null);loadRecords()}
-  return <div className="split"><Panel title="DNS RESOURCE RECORDS" code="DNS" actions={<><select className="toolbar-select" value={zone} onChange={e=>setZone(e.target.value)}>{zones.map(z=><option key={z.name}>{z.name}</option>)}</select><Button icon={Plus} kind="primary" onClick={()=>setModal('create')}>NEW RECORD</Button><Button icon={RefreshCw} onClick={loadRecords}>REFRESH</Button></>}><Table rows={records} rowKey="name" selectedKey={sel?.name} onRow={setSel} cols={[{key:'name',label:'NAME'},{key:'type',label:'TYPE'},{key:'value',label:'VALUE'},{key:'ttl',label:'TTL'}]}/></Panel>
-  <Panel title="ZONE / RECORD INSPECTOR" code="OBJ" className="inspector"><KV items={[['ZONE',zone],['ZONE TYPE',zones.find(x=>x.name===zone)?.type],['AD INTEGRATED',zones.find(x=>x.name===zone)?.integrated?'YES':'NO']]}/>{sel&&<><div className="subsection"><KV items={[['RECORD',sel.name],['TYPE',sel.type],['VALUE',sel.value],['TTL',sel.ttl]]}/></div><Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE RECORD</Button></>}</Panel>
+  async function createZone(v){await api('/api/dns/zones',{method:'POST',body:JSON.stringify(v)});notify('DNS ZONE CREATED','ok');await loadZones()}
+  async function deleteZone(){await api('/api/dns/zones/delete',{method:'POST',body:JSON.stringify({name:zone})});notify('DNS ZONE DELETED','ok');setSel(null);setZone('');await loadZones()}
+  const z=zones.find(x=>x.name===zone)
+  return <div className="split"><Panel title="DNS RESOURCE RECORDS" code="DNS" actions={<><select className="toolbar-select" value={zone} onChange={e=>setZone(e.target.value)}>{zones.map(z=><option key={z.name}>{z.name}</option>)}</select><Button icon={Plus} onClick={()=>setModal('zone')}>NEW ZONE</Button><Button icon={Plus} kind="primary" disabled={!zone} onClick={()=>setModal('create')}>NEW RECORD</Button><Button icon={RefreshCw} onClick={loadRecords}>REFRESH</Button></>}><Table rows={records} rowKey="name" selectedKey={sel?.name} onRow={setSel} cols={[{key:'name',label:'NAME'},{key:'type',label:'TYPE'},{key:'value',label:'VALUE'},{key:'ttl',label:'TTL'}]}/></Panel>
+  <Panel title="ZONE / RECORD INSPECTOR" code="OBJ" className="inspector"><KV items={[['ZONE',zone],['ZONE TYPE',z?.type],['AD INTEGRATED',z?.integrated?'YES':'NO'],['REVERSE LOOKUP',z?.reverse?'YES':'NO']]}/>{zone&&<div className="action-grid"><Button icon={Trash2} kind="danger" onClick={()=>setModal('zoneDelete')}>DELETE ZONE</Button></div>}{sel&&<><div className="subsection"><KV items={[['RECORD',sel.name],['TYPE',sel.type],['VALUE',sel.value],['TTL',sel.ttl]]}/></div><div className="action-grid"><Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE RECORD</Button></div></>}</Panel>
+  {modal==='zone'&&<Modal title="CREATE AD-INTEGRATED DNS ZONE" fields={[{name:'name',label:'ZONE NAME'},{name:'replication_scope',label:'REPLICATION SCOPE',type:'select',options:['Domain','Forest','Legacy'],default:'Domain'},{name:'dynamic_update',label:'DYNAMIC UPDATE',type:'select',options:['Secure','NonsecureAndSecure','None'],default:'Secure'}]} onClose={()=>setModal(null)} onSubmit={createZone}/>}
+  {modal==='zoneDelete'&&zone&&<Modal title={'DELETE DNS ZONE / '+zone} subtitle="This removes the entire DNS zone and all records in it." fields={[]} danger submitLabel="DELETE ZONE" onClose={()=>setModal(null)} onSubmit={deleteZone}/>}
   {modal==='create'&&<Modal title={'CREATE DNS RECORD / '+zone} initial={{zone,type:'A',ttl:3600}} fields={[{name:'zone',label:'ZONE'},{name:'name',label:'NAME'},{name:'type',label:'TYPE',type:'select',options:['A','AAAA','CNAME','PTR'],default:'A'},{name:'value',label:'VALUE / TARGET'},{name:'ttl',label:'TTL SECONDS',type:'number',default:3600}]} onClose={()=>setModal(null)} onSubmit={create}/>}
   {modal==='delete'&&sel&&<Modal title={'DELETE DNS RECORD / '+sel.name} fields={[]} danger submitLabel="DELETE RECORD" onClose={()=>setModal(null)} onSubmit={del}/>}
   </div>
@@ -231,36 +255,44 @@ function DNSPage({notify}){
 
 function DHCPPage({notify}){
   const[scopes,setScopes]=useState([]),[scope,setScope]=useState(''),[leases,setLeases]=useState([]),[reservations,setReservations]=useState([]),[tab,setTab]=useState('leases'),[sel,setSel]=useState(null),[modal,setModal]=useState(null)
-  async function loadScopes(){const s=await api('/api/dhcp/scopes');setScopes(s);if(!scope&&s[0])setScope(s[0].scopeId)}
+  async function loadScopes(){const s=await api('/api/dhcp/scopes');setScopes(s);if(!scope&&s[0])setScope(s[0].scopeId);if(scope&&!s.some(x=>x.scopeId===scope))setScope(s[0]?.scopeId||'')}
   async function loadData(){if(!scope)return;try{const[l,r]=await Promise.all([api('/api/dhcp/leases?scope_id='+enc(scope)),api('/api/dhcp/reservations?scope_id='+enc(scope))]);setLeases(l);setReservations(r)}catch(e){notify(e.message,'bad')}}
   useEffect(()=>{loadScopes().catch(e=>notify(e.message,'bad'))},[])
   useEffect(()=>{loadData()},[scope])
   async function create(v){await api('/api/dhcp/reservations',{method:'POST',body:JSON.stringify(v)});notify('RESERVATION CREATED','ok');loadData()}
   async function del(){await api('/api/dhcp/reservations/delete',{method:'POST',body:JSON.stringify({scope_id:sel.scopeId,ip_address:sel.ipAddress})});notify('RESERVATION REMOVED','ok');setSel(null);loadData()}
+  async function createScope(v){await api('/api/dhcp/scopes',{method:'POST',body:JSON.stringify(v)});notify('DHCP SCOPE CREATED','ok');await loadScopes()}
+  async function scopeState(state){await api('/api/dhcp/scopes/state',{method:'POST',body:JSON.stringify({scope_id:scope,state})});notify('SCOPE STATE UPDATED','ok');await loadScopes()}
+  async function deleteScope(){await api('/api/dhcp/scopes/delete',{method:'POST',body:JSON.stringify({scope_id:scope})});notify('DHCP SCOPE DELETED','ok');setScope('');await loadScopes()}
   const s=scopes.find(x=>x.scopeId===scope)
-  return <div className="stack"><Panel title="DHCP SCOPE SELECTOR" code="DHC" actions={<><select className="toolbar-select" value={scope} onChange={e=>setScope(e.target.value)}>{scopes.map(x=><option key={x.scopeId} value={x.scopeId}>{x.scopeId} / {x.name}</option>)}</select><Button icon={RefreshCw} onClick={loadData}>REFRESH</Button></>}><div className="metrics compact">{s&&[['STATE',s.state,'STA'],['RANGE',s.startRange+' — '+s.endRange,'RNG'],['IN USE',s.inUse,'USE'],['FREE',s.free,'FRE']].map(x=><div className="metric" key={x[0]}><span>{x[2]}</span><strong>{x[1]}</strong><small>{x[0]}</small></div>)}</div></Panel>
+  return <div className="stack"><Panel title="DHCP SCOPE SELECTOR" code="DHC" actions={<><select className="toolbar-select" value={scope} onChange={e=>setScope(e.target.value)}>{scopes.map(x=><option key={x.scopeId} value={x.scopeId}>{x.scopeId} / {x.name}</option>)}</select><Button icon={Plus} kind="primary" onClick={()=>setModal('scopeCreate')}>NEW SCOPE</Button>{s&&<Button onClick={()=>scopeState(s.state==='Active'?'Inactive':'Active')}>{s.state==='Active'?'DEACTIVATE':'ACTIVATE'}</Button>}{s&&<Button icon={Trash2} kind="danger" onClick={()=>setModal('scopeDelete')}>DELETE SCOPE</Button>}<Button icon={RefreshCw} onClick={loadData}>REFRESH</Button></>}><div className="metrics compact">{s&&[['STATE',s.state,'STA'],['RANGE',s.startRange+' — '+s.endRange,'RNG'],['IN USE',s.inUse,'USE'],['FREE',s.free,'FRE']].map(x=><div className="metric" key={x[0]}><span>{x[2]}</span><strong>{x[1]}</strong><small>{x[0]}</small></div>)}</div></Panel>
   <Panel title="ADDRESS ALLOCATION" code="ADDR" actions={<><Button kind={tab==='leases'?'active':''} onClick={()=>{setTab('leases');setSel(null)}}>LEASES</Button><Button kind={tab==='reservations'?'active':''} onClick={()=>{setTab('reservations');setSel(null)}}>RESERVATIONS</Button>{tab==='reservations'&&<Button icon={Plus} kind="primary" onClick={()=>setModal('create')}>NEW RESERVATION</Button>}</>}>
     {tab==='leases'?<Table rows={leases} rowKey="ipAddress" cols={[{key:'ipAddress',label:'IP ADDRESS'},{key:'hostName',label:'HOSTNAME'},{key:'clientId',label:'CLIENT ID'},{key:'state',label:'STATE'},{key:'expiry',label:'EXPIRY'}]}/>:<Table rows={reservations} rowKey="ipAddress" selectedKey={sel?.ipAddress} onRow={setSel} cols={[{key:'ipAddress',label:'IP ADDRESS'},{key:'name',label:'NAME'},{key:'clientId',label:'CLIENT ID'},{key:'description',label:'DESCRIPTION'}]}/>}
     {tab==='reservations'&&sel&&<div className="inline-tools"><Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE SELECTED RESERVATION</Button></div>}
   </Panel>
+  {modal==='scopeCreate'&&<Modal title="CREATE DHCP IPV4 SCOPE" fields={[{name:'name',label:'SCOPE NAME'},{name:'start_range',label:'START RANGE'},{name:'end_range',label:'END RANGE'},{name:'subnet_mask',label:'SUBNET MASK'},{name:'lease_days',label:'LEASE DAYS',type:'number',default:8},{name:'state',label:'INITIAL STATE',type:'select',options:['Active','Inactive'],default:'Active'},{name:'description',label:'DESCRIPTION'}]} onClose={()=>setModal(null)} onSubmit={createScope}/>}
+  {modal==='scopeDelete'&&s&&<Modal title={'DELETE DHCP SCOPE / '+scope} subtitle="All leases, reservations and scope settings will be removed." fields={[]} danger submitLabel="DELETE SCOPE" onClose={()=>setModal(null)} onSubmit={deleteScope}/>}
   {modal==='create'&&<Modal title={'CREATE DHCP RESERVATION / '+scope} initial={{scope_id:scope}} fields={[{name:'scope_id',label:'SCOPE ID'},{name:'ip_address',label:'IP ADDRESS'},{name:'client_id',label:'CLIENT ID / MAC'},{name:'name',label:'NAME'},{name:'description',label:'DESCRIPTION'}]} onClose={()=>setModal(null)} onSubmit={create}/>}
   {modal==='delete'&&sel&&<Modal title={'DELETE RESERVATION / '+sel.ipAddress} fields={[]} danger submitLabel="DELETE RESERVATION" onClose={()=>setModal(null)} onSubmit={del}/>}
   </div>
 }
 
 function GPOPage({notify}){
-  const[rows,setRows]=useState([]),[links,setLinks]=useState([]),[sel,setSel]=useState(null),[modal,setModal]=useState(null),[report,setReport]=useState(null)
+  const[rows,setRows]=useState([]),[links,setLinks]=useState([]),[sel,setSel]=useState(null),[permissions,setPermissions]=useState([]),[modal,setModal]=useState(null),[report,setReport]=useState(null)
   async function load(){try{const[g,l]=await Promise.all([api('/api/gpo'),api('/api/gpo/links')]);setRows(g);setLinks(l)}catch(e){notify(e.message,'bad')}}
+  async function open(r){setSel(r);try{setPermissions(await api('/api/gpo/'+enc(r.id)+'/permissions'))}catch(e){notify(e.message,'bad')}}
   useEffect(()=>{load()},[])
-  async function command(path,method='POST',body){try{const r=await api(path,{method,body:body?JSON.stringify(body):undefined});notify('GPO COMMAND COMPLETED','ok');load();return r}catch(e){notify(e.message,'bad');throw e}}
-  return <div className="split"><Panel title="GROUP POLICY OBJECTS" code="GPO" actions={<><Button icon={Plus} kind="primary" onClick={()=>setModal('create')}>NEW GPO</Button><Button icon={RefreshCw} onClick={load}>REFRESH</Button></>}><Table rows={rows} rowKey="id" selectedKey={sel?.id} onRow={setSel} cols={[{key:'displayName',label:'GPO'},{key:'status',label:'STATUS'},{key:'owner',label:'OWNER'},{key:'modified',label:'MODIFIED'}]}/></Panel>
+  async function command(path,method='POST',body){try{const r=await api(path,{method,body:body?JSON.stringify(body):undefined});notify('GPO COMMAND COMPLETED','ok');load();if(sel)open(sel);return r}catch(e){notify(e.message,'bad');throw e}}
+  return <div className="split"><Panel title="GROUP POLICY OBJECTS" code="GPO" actions={<><Button icon={Plus} kind="primary" onClick={()=>setModal('create')}>NEW GPO</Button><Button icon={RefreshCw} onClick={load}>REFRESH</Button></>}><Table rows={rows} rowKey="id" selectedKey={sel?.id} onRow={open} cols={[{key:'displayName',label:'GPO'},{key:'status',label:'STATUS'},{key:'owner',label:'OWNER'},{key:'modified',label:'MODIFIED'}]}/></Panel>
   <Panel title="GPO INSPECTOR" code="OBJ" className="inspector">{!sel?<div className="empty">SELECT A POLICY OBJECT</div>:<>
     <div className="object-head"><div className="avatar"><ShieldCheck/></div><div><h3>{sel.displayName}</h3><p>{sel.id}</p></div></div><KV items={[['STATUS',sel.status],['OWNER',sel.owner],['MODIFIED',sel.modified]]}/>
-    <div className="action-grid"><Button icon={Link2} onClick={()=>setModal('link')}>LINK</Button><Button icon={Archive} onClick={()=>setModal('backup')}>BACKUP</Button><Button onClick={()=>setModal('status')}>SET STATUS</Button><Button onClick={async()=>{const r=await command('/api/gpo/'+enc(sel.id)+'/report','GET');setReport(r)}}>REPORT</Button><Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE</Button></div>
+    <div className="action-grid"><Button icon={Link2} onClick={()=>setModal('link')}>LINK</Button><Button icon={Archive} onClick={()=>setModal('backup')}>BACKUP</Button><Button onClick={()=>setModal('status')}>SET STATUS</Button><Button onClick={async()=>{const r=await command('/api/gpo/'+enc(sel.id)+'/report','GET');setReport(r)}}>REPORT</Button><Button icon={KeyRound} onClick={()=>setModal('permission')}>SET ACL</Button><Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE</Button></div>
+    <div className="subsection"><span className="eyebrow">SECURITY FILTER / PERMISSIONS</span>{permissions.map((x,i)=><div className="mini-row" key={i}><KeyRound size={13}/><span>{x.trustee}</span><small>{x.permission}</small></div>)}</div>
     <div className="subsection"><span className="eyebrow">LINKS</span>{links.filter(x=>x.displayName===sel.displayName).map((x,i)=><div className="mini-row" key={i}><Link2 size={13}/><span>{x.target}</span><small>{x.enforced?'ENFORCED':'NORMAL'}</small><button className="tiny-danger" onClick={()=>command('/api/gpo/'+enc(sel.id)+'/unlink','POST',{target:x.target,enforced:false,enabled:true})}>UNLINK</button></div>)}</div>
   </>}</Panel>
   {modal==='create'&&<Modal title="CREATE GROUP POLICY OBJECT" fields={[{name:'name',label:'GPO NAME'},{name:'comment',label:'COMMENT'}]} onClose={()=>setModal(null)} onSubmit={v=>command('/api/gpo','POST',v)}/>}
   {modal==='link'&&sel&&<Modal title={'LINK GPO / '+sel.displayName} fields={[{name:'target',label:'TARGET DOMAIN / OU DN'},{name:'enabled',label:'LINK ENABLED',type:'checkbox',default:true},{name:'enforced',label:'ENFORCED',type:'checkbox',default:false},{name:'order',label:'LINK ORDER',type:'number'}]} onClose={()=>setModal(null)} onSubmit={v=>command('/api/gpo/'+enc(sel.id)+'/link','POST',v)}/>}
+  {modal==='permission'&&sel&&<Modal title={'SET GPO PERMISSION / '+sel.displayName} fields={[{name:'trustee',label:'USER / GROUP NAME'},{name:'target_type',label:'TARGET TYPE',type:'select',options:['User','Group','Computer'],default:'Group'},{name:'permission',label:'PERMISSION',type:'select',options:['GpoRead','GpoApply','GpoEdit','GpoEditDeleteModifySecurity'],default:'GpoRead'},{name:'replace',label:'REPLACE EXISTING PERMISSION',type:'checkbox',default:false}]} onClose={()=>setModal(null)} onSubmit={v=>command('/api/gpo/'+enc(sel.id)+'/permissions','POST',v)}/>}
   {modal==='backup'&&sel&&<Modal title={'BACKUP GPO / '+sel.displayName} fields={[{name:'path',label:'WINDOWS WORKER BACKUP PATH',default:'C:\\ProgramData\\RsatFull\\GpoBackups'}]} onClose={()=>setModal(null)} onSubmit={v=>command('/api/gpo/'+enc(sel.id)+'/backup','POST',v)}/>}
   {modal==='status'&&sel&&<Modal title={'SET GPO STATUS / '+sel.displayName} fields={[{name:'status',label:'STATUS',type:'select',options:['AllSettingsEnabled','UserSettingsDisabled','ComputerSettingsDisabled','AllSettingsDisabled'],default:sel.status}]} onClose={()=>setModal(null)} onSubmit={v=>command('/api/gpo/'+enc(sel.id)+'/status','POST',v)}/>}
   {modal==='delete'&&sel&&<Modal title={'DELETE GPO / '+sel.displayName} fields={[]} danger submitLabel="DELETE GPO" onClose={()=>setModal(null)} onSubmit={()=>command('/api/gpo/'+enc(sel.id),'DELETE')}/>}
@@ -280,7 +312,7 @@ function App(){
   const current=nav.find(x=>x[0]===section)
   function notify(text,kind='ok'){setToast({text,kind});setTimeout(()=>setToast(null),3200)}
   useEffect(()=>{api('/api/auth/me').then(setMe).catch(()=>{});const t=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(t)},[])
-  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage})[section],[section])
+  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage})[section],[section])
   return <div className="app">
     <aside className="sidebar">
       <div className="brand"><div className="brand-glyph">R&gt;</div><div><b>RSAT//FULL</b><span>REMOTE ADMIN SYSTEM</span></div></div>
