@@ -1,24 +1,82 @@
 # RSAT Full for macOS & Linux
 
-A cross-platform web administration center for Microsoft Active Directory environments. The UI and control plane run on macOS or Linux; privileged RSAT operations execute on a dedicated domain-joined Windows worker through an allow-listed API.
+A cross-platform administration center for Microsoft Active Directory environments, designed to make the daily ADAC / ADUC / DNS / DHCP / Group Policy workflow usable from macOS and Linux.
 
-> This project does not attempt to run Microsoft MMC binaries on macOS. It provides a modern web control plane for common RSAT workflows while keeping Windows-native operations on Windows.
+The control plane and UI run on macOS/Linux. Microsoft-native RSAT operations run on a dedicated, domain-joined Windows worker through a strict allow-listed API.
 
-## What is included
+> This is not a binary port of MMC. It is a web-native administration layer over supported Microsoft PowerShell/RSAT modules.
 
-- Modern React administration UI
+## Interface
+
+The UI uses a self-contained retro systems-console design: dense information, monospace typography, hard borders, explicit state indicators, and keyboard-friendly administration flows. No CDN or external font is required.
+
+## Implemented management areas
+
+### Active Directory / ADAC / ADUC
+
+- Domain and forest identity
+- FSMO role owners
+- Domain controller inventory
+- Replication partner health
+- Trust inventory
+- Sites and subnet inventory
+- Default domain password policy
+- Fine-grained password policy inventory
+- Active Directory Recycle Bin browsing and object restore
+- User search and detailed properties
+- User creation and attribute editing
+- Account unlock, enable, disable and deletion
+- Password reset + change-at-next-logon
+- Move users between OUs
+- User group membership view
+- Group inventory and creation/deletion
+- Group membership add/remove
+- Computer inventory/search
+- Computer enable/disable/reset/move/delete
+- OU inventory/create/delete with accidental deletion handling
+
+### DNS
+
+- Zone inventory
+- AD-integrated primary zone creation
+- Zone deletion
+- A / AAAA / CNAME / PTR inventory
+- Record creation
+- Record deletion
+
+### DHCP
+
+- IPv4 scope inventory/statistics
+- Scope creation
+- Scope activate/deactivate
+- Scope deletion
+- Lease inventory
+- Reservation inventory
+- Reservation create/delete
+
+### Group Policy
+
+- GPO inventory
+- GPO creation/deletion
+- GPO link/unlink
+- Link order/enforced state
+- User/computer settings status
+- GPO backup
+- XML report
+- Permission/security filtering inventory
+- GPO permission updates
+
+### Platform
+
 - FastAPI control plane
-- Local authentication for standalone deployment
-- Role-based access control foundation
 - PostgreSQL audit trail
-- Active Directory users, groups, computers and OUs
-- Unlock / enable / disable / password reset workflows
-- Windows DNS inventory and record creation API
-- Windows DHCP scope statistics and reservation API
-- Group Policy inventory and GPO creation API
-- Windows RSAT worker with no arbitrary PowerShell endpoint
-- Docker Compose deployment for macOS and Linux
-- Demo mode so the application can be explored without an AD environment
+- Role-based authorization
+- Expiring JWT sessions
+- Dedicated Windows RSAT worker
+- No arbitrary PowerShell execution endpoint
+- Docker Compose deployment
+- macOS bootstrap
+- Demo mode
 - GitHub Actions CI
 
 ## Architecture
@@ -28,7 +86,7 @@ macOS / Linux
     Browser
        |
        v
- React + Nginx :8080
+ Retro React UI + Nginx :8080
        |
        v
  FastAPI control plane
@@ -41,14 +99,31 @@ macOS / Linux
                          Windows Admin Worker
                          domain joined + RSAT
                                   |
-                 +----------------+----------------+
-                 |                |                |
-           Active Directory      DNS/DHCP         GPO
+          +-----------------------+----------------------+
+          |                       |                      |
+    Active Directory          DNS / DHCP          Group Policy
 ```
 
-See [Architecture](docs/ARCHITECTURE.md) for the trust boundaries and design rationale.
+The Windows worker is modular:
 
-## Start on a Mac
+```text
+windows-agent/app/
+├── main.py
+├── common.py
+├── models.py
+├── runner.py
+└── routers/
+    ├── ad.py
+    ├── domain.py
+    ├── network.py
+    └── gpo.py
+```
+
+See [Architecture](docs/ARCHITECTURE.md).
+
+## Start on macOS
+
+Prerequisite: Docker Desktop, Rancher Desktop, or Colima with Docker Compose.
 
 ```bash
 git clone https://github.com/bahram-khakbaz/Rsat-Full-for-macOS-Linux.git
@@ -57,75 +132,93 @@ chmod +x scripts/*.sh
 ./scripts/macos-bootstrap.sh
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:8080
 ```
 
-The bootstrap script generates the local secrets and prints the generated admin password once.
+The bootstrap script creates local secrets and prints the generated administrator password once.
 
 ## Demo mode
 
-The generated configuration starts with:
+The initial configuration uses:
 
 ```env
 DEMO_MODE=true
 ```
 
-This provides sample AD, DNS, DHCP and GPO data without contacting any domain controller.
+The complete UI can therefore be explored without a domain controller or Windows worker.
 
-## Connect a real Windows / AD environment
+## Connect a real AD environment
 
-1. Prepare a dedicated domain-joined Windows management host.
-2. Copy the `windows-agent` directory to it.
-3. Install the RSAT modules with `windows-agent/install-rsat.ps1`.
-4. Configure `windows-agent/.env` with a strong worker token.
-5. Start the worker with `windows-agent/run-worker.ps1`.
-6. On the Mac edit `.env` and set:
+Use a dedicated domain-joined Windows management host. Do not run the worker on a domain controller.
+
+On Windows:
+
+```powershell
+cd windows-agent
+Copy-Item .env.example .env
+notepad .env
+.\install-rsat.ps1
+.\run-worker.ps1
+```
+
+On the Mac edit `.env`:
 
 ```env
 DEMO_MODE=false
 WORKER_URL=http://your-management-host:8765
-WORKER_TOKEN=<same-worker-token>
+WORKER_TOKEN=<same token configured on Windows>
 ```
 
-7. Restart:
+Restart:
 
 ```bash
 docker compose up -d --build
 ```
 
-Full instructions: [Windows Worker](docs/WINDOWS_WORKER.md) and [macOS Deployment](docs/MACOS_DEPLOYMENT.md).
+Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEPLOYMENT.md), and [Security](docs/SECURITY.md) before production use.
 
-## Security
+## Security model
 
-The repository contains no real domain data or credentials. The Windows worker only exposes explicit administration actions and does not offer arbitrary PowerShell execution. Production deployments should use organizational SSO, TLS, a least-privilege service identity, firewall restrictions, and centralized audit shipping.
+- No domain credential is stored in the frontend.
+- The control plane never exposes a generic PowerShell endpoint.
+- Worker calls are bearer-token protected.
+- Command values are supplied through process environment variables rather than interpolated into PowerShell source.
+- Control-plane permissions separate helpdesk, network, GPO, audit and administrator capabilities.
+- Write operations are audited.
+- Password values are redacted from audit data.
+- The default macOS deployment binds the UI to localhost only.
 
-Read [Security](docs/SECURITY.md) before production use.
+For production, add organizational OIDC/SSO, TLS, firewall restrictions and a least-privilege delegated worker identity.
 
-## Current coverage and boundaries
+## Scope boundary
 
-The project covers common day-to-day RSAT administration, but a complete reimplementation of every Microsoft MMC snap-in is a much larger product. Advanced Group Policy editing and specialized consoles such as AD CS, DFS, Failover Clustering, and forest/schema administration remain delegated to native Windows tools in this release.
+This project targets the ADAC / ADUC / DNS / DHCP / GPMC workflows administrators use most often.
+
+Specialized RSAT consoles such as AD CS, DFS, Failover Clustering, NPS, WSUS, Hyper-V Manager, Storage Migration Service and every possible MMC extension are separate products/domains and are not claimed as implemented here.
 
 See [Coverage](docs/COVERAGE.md).
 
 ## Repository structure
 
 ```text
-backend/          FastAPI control plane and audit/RBAC
-frontend/         React web UI
-windows-agent/    Windows-only allow-listed RSAT worker
+backend/          FastAPI control plane, RBAC and audit
+frontend/         Cross-platform retro administration UI
+windows-agent/    Windows-only allow-listed RSAT execution layer
 docs/             Architecture, security and deployment docs
 scripts/          Bootstrap and verification utilities
 ```
 
-## Verify the source tree
+## Verify
 
 ```bash
 ./scripts/verify.sh
 ```
 
+CI independently tests Python and builds the frontend on every push.
+
 ## License
 
-No open-source license has been selected yet. Add a license before redistributing the project outside your organization.
+No open-source license has been selected yet. Add a license before redistributing outside your organization.
