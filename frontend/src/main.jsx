@@ -1,26 +1,25 @@
 import React,{useEffect,useMemo,useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {
-  Activity,Archive,Box,ChevronRight,Command,Computer,Database,FileClock,FolderTree,
-  Globe2,Group,HardDrive,KeyRound,Link2,LockKeyhole,LogOut,Network,Plus,RefreshCw,
-  Search,Server,ShieldCheck,Terminal,Trash2,UnlockKeyhole,UserRoundCog,Users,Wifi
+  Activity,Archive,Box,ChevronDown,ChevronRight,Command,Computer,Database,Download,FileClock,Filter,Folder,FolderTree,
+  Globe2,Group,HardDrive,KeyRound,Link2,LockKeyhole,LogOut,MoreHorizontal,Network,Plus,RefreshCw,
+  Search,Server,ShieldCheck,Terminal,Trash2,UnlockKeyhole,Upload,UserRoundCog,Users,Wifi
 } from 'lucide-react'
 import './styles.css'
 
 const TOKEN='rsat_token'
 const enc=encodeURIComponent
 const nav=[
-  ['overview','00','OVERVIEW',Activity],
-  ['domain','01','DOMAIN / FOREST',Server],
-  ['users','02','USERS',Users],
-  ['groups','03','GROUPS',Group],
-  ['computers','04','COMPUTERS',Computer],
-  ['ous','05','ORGANIZATIONAL UNITS',FolderTree],
-  ['recycle','06','RECYCLE BIN',Archive],
-  ['dns','07','DNS',Globe2],
-  ['dhcp','08','DHCP',Network],
-  ['gpo','09','GROUP POLICY',ShieldCheck],
-  ['audit','10','AUDIT LOG',FileClock],
+  ['overview','1','Overview',Activity],
+  ['domain','2','Domain / Forest',Server],
+  ['users','3','Users',Users],
+  ['groups','4','Groups',Group],
+  ['computers','5','Computers',Computer],
+  ['ous','6','Organizational Units',FolderTree],
+  ['dns','7','DNS',Globe2],
+  ['dhcp','8','DHCP',Network],
+  ['gpo','9','Group Policy',ShieldCheck],
+  ['audit','0','Audit Log',FileClock],
 ]
 
 async function api(path,init={}){
@@ -88,6 +87,96 @@ function Login(){
   </div>
 }
 
+
+function TreeItem({icon:Icon,label,active=false,indent=0,onClick,open=false,muted=false}){
+  return <button className={'tree-item '+(active?'active ':'')+(muted?'muted':'')} style={{paddingLeft:10+indent*18}} onClick={onClick}>
+    <span className="tree-guide">{indent? '├':'›'}</span>{open?<ChevronDown size={11}/>:<span className="tree-spacer"/>}{Icon&&<Icon size={13}/>}<span>{label}</span>
+  </button>
+}
+
+function DirectoryTree({section,setSection,shell}){
+  const domain=(shell.summary?.domain||'DIRECTORY.LOCAL').toUpperCase()
+  const ous=(shell.ous||[]).slice(0,7)
+  return <aside className="directory-tree window-frame">
+    <div className="window-title"><span>ACTIVE DIRECTORY</span><span>−</span></div>
+    <div className="tree-scroll">
+      <TreeItem icon={Globe2} label={domain} open />
+      <TreeItem icon={Activity} label="Dashboard" indent={1} active={section==='overview'} onClick={()=>setSection('overview')}/>
+      <TreeItem icon={Database} label="Domain Information" indent={1} active={section==='domain'} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={Server} label="Domain Controllers" indent={1} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={RefreshCw} label="Replication Status" indent={1} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={KeyRound} label="FSMO Roles" indent={1} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={LockKeyhole} label="Password Policy" indent={1} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={ShieldCheck} label="Fine Grained Policies" indent={1} onClick={()=>setSection('domain')}/>
+      <TreeItem icon={Archive} label="Recycle Bin" indent={1} active={section==='recycle'} onClick={()=>setSection('recycle')}/>
+      <div className="tree-separator"/>
+      <TreeItem icon={Users} label="Users" active={section==='users'} onClick={()=>setSection('users')}/>
+      <TreeItem icon={Group} label="Groups" active={section==='groups'} onClick={()=>setSection('groups')}/>
+      <TreeItem icon={Computer} label="Computers" active={section==='computers'} onClick={()=>setSection('computers')}/>
+      <TreeItem icon={FolderTree} label="Organizational Units" open active={section==='ous'} onClick={()=>setSection('ous')}/>
+      <TreeItem icon={Folder} label={domain.split('.')[0]} indent={1} open onClick={()=>setSection('ous')}/>
+      {ous.map((ou,i)=><TreeItem key={ou.dn||i} icon={Folder} label={ou.name} indent={2} onClick={()=>setSection('ous')}/>)}
+      <div className="tree-separator"/>
+      <TreeItem icon={Network} label="Sites and Services" onClick={()=>setSection('domain')}/>
+      <TreeItem icon={Globe2} label="DNS" active={section==='dns'} onClick={()=>setSection('dns')}/>
+      <TreeItem icon={Network} label="DHCP" active={section==='dhcp'} onClick={()=>setSection('dhcp')}/>
+      <TreeItem icon={ShieldCheck} label="Group Policy" active={section==='gpo'} onClick={()=>setSection('gpo')}/>
+    </div>
+  </aside>
+}
+
+function DomainStatus({shell}){
+  const s=shell.summary||{}, dcs=shell.controllers||[], repl=shell.replication||[]
+  const healthy=repl.every(x=>Number(x.failures||0)===0)
+  return <section className="bottom-window">
+    <div className="window-title"><span>DOMAIN STATUS</span><span>⌃</span></div>
+    <div className="status-list">
+      <div><i/><span>Domain:</span><b>{s.domain||'—'}</b></div>
+      <div><i/><span>Domain Functional Level:</span><b>{s.domainMode||'—'}</b></div>
+      <div><i/><span>Forest Functional Level:</span><b>{s.forestMode||'—'}</b></div>
+      <div><i/><span>Domain Controllers:</span><b>{dcs.length}</b></div>
+      <div><i/><span>Global Catalog:</span><b>{dcs.filter(x=>x.globalCatalog).length}</b></div>
+      <div><i/><span>FSMO Roles:</span><b className="green-text">{s.pdc?'Healthy':'Unknown'}</b></div>
+      <div><i className={healthy?'':'err'}/><span>Replication:</span><b className={healthy?'green-text':'red-text'}>{healthy?'Healthy':'Attention'}</b></div>
+    </div>
+  </section>
+}
+
+function RecentActivity({rows=[]}){
+  return <section className="bottom-window">
+    <div className="window-title"><span>RECENT ACTIVITY</span><span>⌃</span></div>
+    <div className="mini-table-wrap"><table className="mini-table"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr></thead><tbody>
+      {rows.slice(0,8).map(r=><tr key={r.id}><td>{r.at?new Date(r.at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—'}</td><td>{r.actor}</td><td>{r.action}</td><td>{r.target||'—'}</td><td>{r.status==='success'?'Command completed':'Check result'}</td></tr>)}
+      {!rows.length&&<tr><td colSpan="5">No audit events loaded</td></tr>}
+    </tbody></table></div>
+  </section>
+}
+
+function SystemConsole({shell,section}){
+  const now=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})
+  const domain=shell.summary?.domain||'—'
+  const dc=shell.controllers?.[0]?.hostName||shell.controllers?.[0]?.name||'—'
+  const demo=shell.health?.demo_mode
+  const lines=[
+    `[${now}] Connected to control plane ........ OK`,
+    `[${now}] Directory API ..................... OK`,
+    `[${now}] Audit subsystem ................... ${shell.audit?'OK':'N/A'}`,
+    `[${now}] Domain: ${domain}`,
+    `[${now}] DC: ${dc}`,
+    `[${now}] Mode: ${demo?'DEMO':'WINDOWS WORKER'}`,
+    `[${now}] Module: ${section.toUpperCase()}`,
+    `[${now}] Session ready`,
+  ]
+  return <section className="bottom-window console-window">
+    <div className="window-title"><span>SYSTEM CONSOLE</span><span>⋮</span></div>
+    <pre>{lines.map((x,i)=><span key={i} className={i<3?'console-ok':''}>{x}{'\n'}</span>)}</pre>
+  </section>
+}
+
+function BottomDock({shell,section}){
+  return <div className="bottom-dock"><DomainStatus shell={shell}/><RecentActivity rows={shell.audit}/><SystemConsole shell={shell} section={section}/></div>
+}
+
 function Overview({notify}){
   const[data,setData]=useState(null),[loading,setLoading]=useState(true)
   async function load(){setLoading(true);try{
@@ -134,39 +223,81 @@ function Domain({notify}){
 }
 
 function UsersPage({notify}){
-  const[rows,setRows]=useState([]),[q,setQ]=useState(''),[selected,setSelected]=useState(null),[detail,setDetail]=useState(null),[groups,setGroups]=useState([]),[modal,setModal]=useState(null)
-  async function load(){try{setRows(await api('/api/ad/users'+(q?'?q='+enc(q):'')))}catch(e){notify(e.message,'bad')}}
+  const[rows,setRows]=useState([]),[q,setQ]=useState(''),[selected,setSelected]=useState(null),[detail,setDetail]=useState(null),[groups,setGroups]=useState([]),[modal,setModal]=useState(null),[tab,setTab]=useState('General'),[page,setPage]=useState(1)
+  const perPage=15
+  async function load(){try{const r=await api('/api/ad/users'+(q?'?q='+enc(q):''));setRows(r);setPage(1);if(!selected&&r[0])open(r[0])}catch(e){notify(e.message,'bad')}}
   async function open(r){setSelected(r);try{const[d,g]=await Promise.all([api('/api/ad/users/'+enc(r.samAccountName)),api('/api/ad/users/'+enc(r.samAccountName)+'/groups')]);setDetail(d);setGroups(g)}catch(e){notify(e.message,'bad')}}
   async function act(path,method='POST',body){try{await api(path,{method,body:body?JSON.stringify(body):undefined});notify('COMMAND COMPLETED','ok');await load();if(selected)await open(selected)}catch(e){notify(e.message,'bad')}}
   useEffect(()=>{load()},[])
   const createFields=[['sam_account_name','SAM ACCOUNT'],['given_name','GIVEN NAME'],['surname','SURNAME'],['display_name','DISPLAY NAME'],['email','EMAIL'],['department','DEPARTMENT'],['title','TITLE'],['company','COMPANY'],['manager','MANAGER (SAM/DN)'],['ou','TARGET OU DN'],['password','INITIAL PASSWORD','password']]
-  return <div className="split">
-    <Panel title="DIRECTORY USERS" code="USR" actions={<><div className="searchbox"><Search size={14}/><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&load()} placeholder="name / sam / email"/></div><Button icon={Plus} kind="primary" onClick={()=>setModal('create')}>NEW USER</Button><Button icon={RefreshCw} onClick={load}>REFRESH</Button></>}>
-      <Table rows={rows} rowKey="samAccountName" selectedKey={selected?.samAccountName} onRow={open} cols={[
-        {key:'displayName',label:'DISPLAY NAME',render:(v,r)=><><b>{v}</b><small className="line2">{r.samAccountName}</small></>},
-        {key:'department',label:'DEPARTMENT'},{key:'title',label:'TITLE'},
-        {key:'enabled',label:'STATE',render:(v,r)=><>{<Status ok={v}>{v?'ENABLED':'DISABLED'}</Status>}{r.lockedOut&&<Status ok={false}>LOCKED</Status>}</>}
-      ]}/>
-    </Panel>
-    <Panel title="OBJECT INSPECTOR" code="OBJ" className="inspector">
-      {!detail?<div className="empty inspector-empty">SELECT A USER OBJECT</div>:<>
-        <div className="object-head"><div className="avatar">{(detail.displayName||'?').slice(0,2).toUpperCase()}</div><div><h3>{detail.displayName}</h3><p>{detail.samAccountName}</p></div></div>
-        <KV items={[['MAIL',detail.mail],['DEPARTMENT',detail.department],['TITLE',detail.title],['COMPANY',detail.company],['MOBILE',detail.mobile],['LAST LOGON',detail.lastLogon],['DN',detail.dn]]}/>
-        <div className="action-grid">
-          <Button icon={UserRoundCog} onClick={()=>setModal('edit')}>EDIT ATTRIBUTES</Button>
-          <Button icon={UnlockKeyhole} onClick={()=>act('/api/ad/users/'+enc(detail.samAccountName)+'/unlock')}>UNLOCK</Button>
-          <Button icon={KeyRound} onClick={()=>setModal('password')}>RESET PASSWORD</Button>
-          <Button icon={FolderTree} onClick={()=>setModal('move')}>MOVE OU</Button>
-          <Button icon={detail.enabled?LockKeyhole:UnlockKeyhole} onClick={()=>act('/api/ad/users/'+enc(detail.samAccountName)+'/'+(detail.enabled?'disable':'enable'))}>{detail.enabled?'DISABLE':'ENABLE'}</Button>
-          <Button icon={Trash2} kind="danger" onClick={()=>setModal('delete')}>DELETE</Button>
+  const pageCount=Math.max(1,Math.ceil(rows.length/perPage)), visible=rows.slice((page-1)*perPage,page*perPage)
+  const domain=(detail?.dn||'').split(',').filter(x=>x.startsWith('DC=')).map(x=>x.slice(3)).join('.').toUpperCase()||'ACTIVE DIRECTORY'
+  function exportCsv(){
+    const headers=['displayName','samAccountName','mail','department','title','enabled','lastLogon']
+    const csv=[headers.join(','),...rows.map(r=>headers.map(h=>`"${String(r[h]??'').replaceAll('"','""')}"`).join(','))].join('\n')
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a')
+    a.href=url;a.download='rsat-users.csv';a.click();URL.revokeObjectURL(url);notify('CSV EXPORTED','ok')
+  }
+  const detailRows={
+    General:[['Full Name',detail?.displayName],['Display Name',detail?.displayName],['Username',detail?.samAccountName],['Email',detail?.mail],['Department',detail?.department],['Title',detail?.title],['Company',detail?.company],['Manager',detail?.manager],['Mobile',detail?.mobile],['Employee ID',detail?.employeeId],['Distinguished Name',detail?.dn]],
+    Organization:[['Department',detail?.department],['Title',detail?.title],['Company',detail?.company],['Manager',detail?.manager],['Office',detail?.office]],
+    Account:[['Status',detail?.enabled?'Enabled':'Disabled'],['Locked Out',detail?.lockedOut?'Yes':'No'],['Last Logon',detail?.lastLogon],['Created',detail?.created],['Password Last Set',detail?.passwordLastSet],['Password Expires',detail?.passwordExpires],['Password Never Expires',detail?.passwordNeverExpires?'Yes':'No']],
+    'Member Of':groups.map(g=>[g.name,g.scope||'Group']),
+    Attributes:Object.entries(detail||{}).filter(([k])=>!['displayName'].includes(k)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):v])
+  }
+  return <div className="users-screen">
+    <section className="directory-users window-frame">
+      <div className="window-title"><span>DIRECTORY USERS &nbsp;[ {domain} ]</span><span>⌄ &nbsp;×</span></div>
+      <div className="users-toolbar">
+        <div className="main-search"><Search size={14}/><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&load()} placeholder="Search users... (name, username, email, department)"/><button onClick={load}><Search size={14}/></button></div>
+        <button className="square-tool" title="Filter"><Filter size={14}/></button>
+        <button className="toolbar-btn" onClick={()=>setModal('create')}><Plus size={14}/> New User</button>
+        <button className="toolbar-btn" onClick={()=>notify('Bulk import will require a CSV mapping profile','bad')}><Upload size={13}/> Import <ChevronDown size={11}/></button>
+        <button className="toolbar-btn" onClick={exportCsv}><Download size={13}/> Export <ChevronDown size={11}/></button>
+        <button className="square-tool"><MoreHorizontal size={15}/></button>
+      </div>
+      <div className="users-table-wrap">
+        <table className="users-table"><thead><tr><th>#</th><th>Display Name</th><th>Username</th><th>Department</th><th>Title</th><th>Status</th><th>Last Logon ↓</th></tr></thead><tbody>
+          {visible.map((r,i)=><tr key={r.samAccountName} className={selected?.samAccountName===r.samAccountName?'selected':''} onClick={()=>open(r)}>
+            <td>{(page-1)*perPage+i+1}</td><td>{r.displayName}</td><td>{r.samAccountName}</td><td>{r.department||'—'}</td><td>{r.title||'—'}</td>
+            <td><Status ok={r.enabled}>{r.enabled?'Enabled':'Disabled'}</Status>{r.lockedOut&&<span className="locked-flag">Locked</span>}</td><td>{r.lastLogon?new Date(r.lastLogon).toLocaleString():'—'}</td>
+          </tr>)}
+        </tbody></table>
+      </div>
+      <div className="pagination-bar">
+        <span>Showing {(page-1)*perPage+1} to {Math.min(page*perPage,rows.length)} of {rows.length} users</span>
+        <div className="pages"><button disabled={page===1} onClick={()=>setPage(Math.max(1,page-1))}>‹</button>{Array.from({length:Math.min(5,pageCount)},(_,i)=>i+1).map(n=><button key={n} className={page===n?'active':''} onClick={()=>setPage(n)}>{n}</button>)}{pageCount>5&&<><span>...</span><button onClick={()=>setPage(pageCount)}>{pageCount}</button></>}<button disabled={page===pageCount} onClick={()=>setPage(Math.min(pageCount,page+1))}>›</button></div>
+        <label>Show: <select value={perPage} disabled><option>15</option></select></label>
+      </div>
+    </section>
+    <aside className="user-inspector">
+      <section className="window-frame user-details">
+        <div className="window-title"><span>USER DETAILS</span><span>⌄ &nbsp;×</span></div>
+        {!detail?<div className="empty">SELECT A USER</div>:<>
+          <div className="identity-block">
+            <div className="portrait"><Users size={34}/></div>
+            <div className="identity-main"><h3>{detail.displayName}</h3><p>{detail.mail||detail.samAccountName}</p><div><span>Status:</span><Status ok={detail.enabled}>{detail.enabled?'Enabled':'Disabled'}</Status></div><div><span>Last Logon:</span><b>{detail.lastLogon?new Date(detail.lastLogon).toLocaleString():'—'}</b></div><div><span>Created:</span><b>{detail.created?new Date(detail.created).toLocaleString():'—'}</b></div><div><span>Password Last Set:</span><b>{detail.passwordLastSet?new Date(detail.passwordLastSet).toLocaleString():'—'}</b></div><div><span>Password Expires:</span><b>{detail.passwordExpires?new Date(detail.passwordExpires).toLocaleString():'—'}</b></div></div>
+          </div>
+          <div className="detail-tabs">{['General','Organization','Account','Member Of','Attributes'].map(x=><button key={x} className={tab===x?'active':''} onClick={()=>setTab(x)}>{x}</button>)}</div>
+          <div className="detail-list">{(detailRows[tab]||[]).map(([k,v])=><div key={String(k)}><span>{k}</span><b>{String(v??'—')}</b></div>)}</div>
+        </>}
+      </section>
+      <section className="window-frame action-window">
+        <div className="window-title"><span>ACTIONS</span><span>×</span></div>
+        <div className="inspector-actions">
+          <Button icon={UserRoundCog} onClick={()=>detail&&setModal('edit')}>Edit Attributes</Button>
+          <Button icon={UnlockKeyhole} onClick={()=>detail&&act('/api/ad/users/'+enc(detail.samAccountName)+'/unlock')}>Unlock Account</Button>
+          <Button icon={KeyRound} onClick={()=>detail&&setModal('password')}>Reset Password</Button>
+          <Button icon={LockKeyhole} onClick={()=>detail&&act('/api/ad/users/'+enc(detail.samAccountName)+'/disable')}>Disable Account</Button>
+          <Button icon={FolderTree} onClick={()=>detail&&setModal('move')}>Move to OU</Button>
+          <Button icon={UnlockKeyhole} onClick={()=>detail&&act('/api/ad/users/'+enc(detail.samAccountName)+'/enable')}>Enable Account</Button>
+          <Button icon={Trash2} kind="danger" onClick={()=>detail&&setModal('delete')}>Delete User</Button>
+          <Button icon={Group} onClick={()=>setTab('Member Of')}>Change Groups</Button>
         </div>
-        <div className="subsection"><span className="eyebrow">GROUP MEMBERSHIP</span>{groups.map(g=><div className="mini-row" key={g.name}><Group size={13}/><span>{g.name}</span><small>{g.scope}</small></div>)}</div>
-      </>}
-    </Panel>
+      </section>
+    </aside>
     {modal==='create'&&<Modal title="CREATE DIRECTORY USER" fields={createFields.map(x=>({name:x[0],label:x[1],type:x[2]})).concat([{name:'enabled',label:'ACCOUNT ENABLED',type:'checkbox',default:true},{name:'must_change',label:'CHANGE PASSWORD AT LOGON',type:'checkbox',default:true}])} onClose={()=>setModal(null)} onSubmit={async v=>{await api('/api/ad/users',{method:'POST',body:JSON.stringify(v)});notify('USER CREATED','ok');load()}}/>}
-    {modal==='edit'&&detail&&<Modal title={'EDIT '+detail.samAccountName} initial={{display_name:detail.displayName,email:detail.mail,department:detail.department,title:detail.title,company:detail.company,manager:detail.manager,mobile:detail.mobile}} fields={[
-      {name:'display_name',label:'DISPLAY NAME'},{name:'email',label:'EMAIL'},{name:'department',label:'DEPARTMENT'},{name:'title',label:'TITLE'},{name:'company',label:'COMPANY'},{name:'manager',label:'MANAGER'},{name:'mobile',label:'MOBILE'}
-    ]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName),'PATCH',v)}/>}
+    {modal==='edit'&&detail&&<Modal title={'EDIT '+detail.samAccountName} initial={{display_name:detail.displayName,email:detail.mail,department:detail.department,title:detail.title,company:detail.company,manager:detail.manager,mobile:detail.mobile}} fields={[{name:'display_name',label:'DISPLAY NAME'},{name:'email',label:'EMAIL'},{name:'department',label:'DEPARTMENT'},{name:'title',label:'TITLE'},{name:'company',label:'COMPANY'},{name:'manager',label:'MANAGER'},{name:'mobile',label:'MOBILE'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName),'PATCH',v)}/>}
     {modal==='password'&&detail&&<Modal title={'RESET PASSWORD / '+detail.samAccountName} fields={[{name:'new_password',label:'NEW PASSWORD',type:'password'},{name:'must_change',label:'CHANGE AT NEXT LOGON',type:'checkbox',default:true}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/reset-password','POST',v)}/>}
     {modal==='move'&&detail&&<Modal title={'MOVE USER / '+detail.samAccountName} fields={[{name:'target_ou',label:'TARGET OU DISTINGUISHED NAME'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/move','POST',v)}/>}
     {modal==='delete'&&detail&&<Modal title={'DELETE '+detail.samAccountName+' ?'} subtitle="This removes the Active Directory object. Use the Recycle Bin if recovery is required." fields={[]} danger submitLabel="DELETE OBJECT" onClose={()=>setModal(null)} onSubmit={()=>act('/api/ad/users/'+enc(detail.samAccountName),'DELETE')}/>}
@@ -308,24 +439,27 @@ function AuditPage({notify}){
 }
 
 function App(){
-  const[section,setSection]=useState('overview'),[me,setMe]=useState(null),[toast,setToast]=useState(null),[clock,setClock]=useState(new Date())
-  const current=nav.find(x=>x[0]===section)
+  const[section,setSection]=useState('users'),[me,setMe]=useState(null),[toast,setToast]=useState(null),[clock,setClock]=useState(new Date()),[shell,setShell]=useState({summary:null,controllers:[],replication:[],ous:[],audit:[],health:null})
   function notify(text,kind='ok'){setToast({text,kind});setTimeout(()=>setToast(null),3200)}
-  useEffect(()=>{api('/api/auth/me').then(setMe).catch(()=>{});const t=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(t)},[])
-  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage})[section],[section])
-  return <div className="app">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-glyph">R&gt;</div><div><b>RSAT//FULL</b><span>REMOTE ADMIN SYSTEM</span></div></div>
-      <div className="side-rule">DIRECTORY SERVICES</div>
-      <nav>{nav.map(([id,num,label,Icon])=><button key={id} className={id===section?'active':''} onClick={()=>setSection(id)}><span className="nav-num">{num}</span><Icon size={15}/><span>{label}</span><ChevronRight size={12} className="arrow"/></button>)}</nav>
-      <div className="session"><span>SESSION</span><b>{me?.username||'operator'}</b><small>{me?.role||'...'}</small></div>
-      <button className="logout" onClick={()=>{localStorage.removeItem(TOKEN);location.reload()}}><LogOut size={14}/>LOG OUT</button>
-    </aside>
-    <main>
-      <header className="topbar"><div><span className="crumb">ROOT / {current?.[2]}</span><h1>{current?.[2]}</h1></div><div className="top-status"><div><span>LOCAL TIME</span><b>{clock.toLocaleTimeString()}</b></div><div><span>CONTROL PLANE</span><b className="online">● CONNECTED</b></div></div></header>
-      <div className="workspace"><Page notify={notify}/></div>
-      <footer><span>RSAT FULL ADMIN CENTER // BUILD 0.2.0</span><span>ALL PRIVILEGED ACTIONS ARE AUDITED</span></footer>
-    </main>
+  async function refreshShell(){
+    const results=await Promise.allSettled([api('/api/domain/summary'),api('/api/domain/controllers'),api('/api/domain/replication'),api('/api/ad/ous'),api('/api/audit?limit=12'),api('/api/health')])
+    const val=i=>results[i].status==='fulfilled'?results[i].value:null
+    setShell({summary:val(0),controllers:val(1)||[],replication:val(2)||[],ous:val(3)||[],audit:val(4)||[],health:val(5)})
+  }
+  useEffect(()=>{api('/api/auth/me').then(setMe).catch(()=>{});refreshShell();const tick=setInterval(()=>setClock(new Date()),1000);const poll=setInterval(refreshShell,30000);return()=>{clearInterval(tick);clearInterval(poll)}},[])
+  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage})[section]||Overview,[section])
+  const domain=(shell.summary?.domain||'DIRECTORY.LOCAL').toUpperCase(),dc=shell.controllers?.[0]?.name||'—'
+  return <div className="admin-desktop">
+    <header className="app-titlebar">
+      <div className="app-ident"><span className="app-icon">▣</span><b>RSAT FULL :: ACTIVE DIRECTORY ADMINISTRATION CENTER</b><small>v1.2.3</small></div>
+      <div className="connection-strip"><span className="connected">[ Connected ]</span><span>Domain: <b className="green-text">{domain}</b></span><span>DC: <u>{dc}</u></span><span>{clock.toLocaleDateString()} &nbsp; {clock.toLocaleTimeString()}</span><span>▣ &nbsp; {me?.username||'admin'}⌄</span></div>
+    </header>
+    <nav className="module-tabs">{nav.map(([id,num,label,Icon])=><button key={id} className={section===id?'active':''} onClick={()=>setSection(id)}><span>[{num}]</span><Icon size={13}/>{label}</button>)}</nav>
+    <div className="desktop-main">
+      <DirectoryTree section={section} setSection={setSection} shell={shell}/>
+      <div className="page-host"><Page notify={notify}/></div>
+    </div>
+    <BottomDock shell={shell} section={section}/>
     <Toast toast={toast}/>
   </div>
 }
