@@ -7,7 +7,12 @@ router = APIRouter(prefix="/admin", tags=["administration"])
 
 @router.get("/ping")
 def ping():
-    return {"ok": True, "service": "windows-worker", "authenticated": True}
+    identity = run_ps(r"""$who=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$domain=''
+try { Import-Module ActiveDirectory; $domain=(Get-ADDomain).DNSRoot } catch {}
+[pscustomobject]@{runAs=$who;computer=$env:COMPUTERNAME;domain=$domain} | ConvertTo-Json -Compress
+""")
+    return {"ok": True, "service": "windows-worker", "authenticated": True, "identity": identity}
 
 class DcTestBody(BaseModel):
     host: str = Field(min_length=1, max_length=255)
