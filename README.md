@@ -66,6 +66,16 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 - Permission/security filtering inventory
 - GPO permission updates
 
+### Settings / multi-site topology
+
+- In-panel connection settings; no manual `.env` editing after initial bootstrap
+- Windows worker URL and encrypted worker token storage
+- Demo / production mode switching from UI
+- Multiple sites with any number of domain controllers per site
+- Automatic domain controller discovery from Active Directory
+- Per-DC connectivity checks for DNS, LDAP, Kerberos, SMB, LDAPS and Global Catalog
+- Site/DC configuration stored in PostgreSQL and applied without restarting the control plane
+
 ### Platform
 
 - FastAPI control plane
@@ -164,19 +174,9 @@ notepad .env
 .\run-worker.ps1
 ```
 
-On the Mac edit `.env`:
+After the first bootstrap, open **Settings** in the web UI. Configure the Windows worker URL/token there, switch from Demo to Production, add your sites and DCs, or use **Discover DCs from AD**. Saved runtime settings take effect without restarting the control plane.
 
-```env
-DEMO_MODE=false
-WORKER_URL=http://your-management-host:8765
-WORKER_TOKEN=<same token configured on Windows>
-```
-
-Restart:
-
-```bash
-docker compose up -d --build
-```
+The `.env` values remain bootstrap/fallback values; normal connection and topology management is performed from the UI.
 
 Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEPLOYMENT.md), and [Security](docs/SECURITY.md) before production use.
 
