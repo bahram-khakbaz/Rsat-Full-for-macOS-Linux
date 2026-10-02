@@ -22,6 +22,30 @@ class DnsDeleteBody(BaseModel):
     type: Literal["A","AAAA","CNAME","PTR"]
     value: str = ""
 
+class ZoneCreate(BaseModel):
+    name: str
+    replication_scope: Literal["Domain","Forest","Legacy"] = "Domain"
+    dynamic_update: Literal["Secure","NonsecureAndSecure","None"] = "Secure"
+
+class ZoneDelete(BaseModel):
+    name: str
+
+class ScopeCreate(BaseModel):
+    name: str
+    start_range: str
+    end_range: str
+    subnet_mask: str
+    lease_days: int = Field(default=8, ge=1, le=365)
+    state: Literal["Active","Inactive"] = "Active"
+    description: str = ""
+
+class ScopeDelete(BaseModel):
+    scope_id: str
+
+class ScopeState(BaseModel):
+    scope_id: str
+    state: Literal["Active","Inactive"]
+
 class ReservationBody(BaseModel):
     scope_id: str
     ip_address: str
@@ -36,6 +60,18 @@ class ReservationDelete(BaseModel):
 @router.get("/dns/zones")
 async def dns_zones(_: Principal = Depends(require("dns.read"))):
     return await worker.request("GET", "/dns/zones")
+
+@router.post("/dns/zones")
+async def dns_zone_create(body: ZoneCreate, principal: Principal = Depends(require("dns.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dns/zones", payload=body.model_dump())
+    write_audit(db, principal, "dns.zone.create", body.name, details=body.model_dump())
+    return result
+
+@router.post("/dns/zones/delete")
+async def dns_zone_delete(body: ZoneDelete, principal: Principal = Depends(require("dns.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dns/zones/delete", payload=body.model_dump())
+    write_audit(db, principal, "dns.zone.delete", body.name)
+    return result
 
 @router.get("/dns/records")
 async def dns_records(zone: str = Query(default=""), _: Principal = Depends(require("dns.read"))):
@@ -56,6 +92,24 @@ async def dns_delete(body: DnsDeleteBody, principal: Principal = Depends(require
 @router.get("/dhcp/scopes")
 async def dhcp_scopes(_: Principal = Depends(require("dhcp.read"))):
     return await worker.request("GET", "/dhcp/scopes")
+
+@router.post("/dhcp/scopes")
+async def dhcp_scope_create(body: ScopeCreate, principal: Principal = Depends(require("dhcp.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dhcp/scopes", payload=body.model_dump())
+    write_audit(db, principal, "dhcp.scope.create", body.name, details=body.model_dump())
+    return result
+
+@router.post("/dhcp/scopes/delete")
+async def dhcp_scope_delete(body: ScopeDelete, principal: Principal = Depends(require("dhcp.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dhcp/scopes/delete", payload=body.model_dump())
+    write_audit(db, principal, "dhcp.scope.delete", body.scope_id)
+    return result
+
+@router.post("/dhcp/scopes/state")
+async def dhcp_scope_state(body: ScopeState, principal: Principal = Depends(require("dhcp.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dhcp/scopes/state", payload=body.model_dump())
+    write_audit(db, principal, "dhcp.scope.state", body.scope_id, details={"state": body.state})
+    return result
 
 @router.get("/dhcp/leases")
 async def dhcp_leases(scope_id: str = Query(default=""), _: Principal = Depends(require("dhcp.read"))):
