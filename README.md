@@ -69,7 +69,10 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 ### Settings / multi-site topology
 
 - In-panel connection settings; no manual `.env` editing after initial bootstrap
-- Windows worker URL and encrypted worker token storage
+- Windows worker URL + one-time pairing code; no worker secret is typed or managed manually
+- The paired worker secret is generated automatically and stored encrypted by the control plane
+- AD credentials stay on Windows; macOS never stores an AD username/password
+- Worker runs under Windows Integrated Authentication using a delegated domain service account or gMSA
 - Demo / production mode switching from UI
 - Multiple sites with any number of domain controllers per site
 - Automatic domain controller discovery from Active Directory
@@ -174,9 +177,15 @@ notepad .env
 .\run-worker.ps1
 ```
 
-After the first bootstrap, open **Settings** in the web UI. Configure the Windows worker URL/token there, switch from Demo to Production, add your sites and DCs, or use **Discover DCs from AD**. Saved runtime settings take effect without restarting the control plane.
+After the first bootstrap, open **Settings** in the web UI.
 
-The `.env` values remain bootstrap/fallback values; normal connection and topology management is performed from the UI.
+1. On the domain-joined Windows management host, start `run-worker.ps1`.
+2. The worker automatically creates its internal secret and prints a one-time pairing code.
+3. In Settings, enter only the Worker URL and that one-time pairing code.
+4. Pair the worker, switch from Demo to Production, then use **Discover DCs from AD**.
+5. Review the discovered sites/DCs and save the topology.
+
+You never type an AD password into the macOS panel. For an initial lab/test, run the worker under your signed-in domain account. For production, run it under a delegated service account or gMSA with only the rights required by the workflows.
 
 Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEPLOYMENT.md), and [Security](docs/SECURITY.md) before production use.
 
@@ -184,7 +193,11 @@ Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEP
 
 - No domain credential is stored in the frontend.
 - The control plane never exposes a generic PowerShell endpoint.
-- Worker calls are bearer-token protected.
+- Worker calls are protected by an internal high-entropy credential created automatically on Windows.
+- The operator never manages that credential directly; a one-time pairing code exchanges it with the control plane.
+- Pairing codes expire after 15 minutes and are single-use.
+- Active Directory credentials are never stored on macOS or in the web UI.
+- The Windows worker uses the security token of its own domain account (preferably a delegated service account/gMSA).
 - Command values are supplied through process environment variables rather than interpolated into PowerShell source.
 - Control-plane permissions separate helpdesk, network, GPO, audit and administrator capabilities.
 - Write operations are audited.
