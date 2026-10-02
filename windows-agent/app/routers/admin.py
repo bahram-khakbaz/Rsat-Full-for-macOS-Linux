@@ -5,6 +5,10 @@ from ..runner import run_ps
 
 router = APIRouter(prefix="/admin", tags=["administration"])
 
+@router.get("/ping")
+def ping():
+    return {"ok": True, "service": "windows-worker", "authenticated": True}
+
 class DcTestBody(BaseModel):
     host: str = Field(min_length=1, max_length=255)
 
