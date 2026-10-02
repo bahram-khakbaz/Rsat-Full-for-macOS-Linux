@@ -22,13 +22,13 @@ class SiteBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     code: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=500)
-    dcs: list[DcBody] = []
+    dcs: list[DcBody] = Field(default_factory=list)
 
 class SettingsBody(BaseModel):
     demo_mode: bool = True
     worker_url: str = Field(default="", max_length=500)
     worker_token: str | None = Field(default=None, max_length=1000)
-    sites: list[SiteBody] = []
+    sites: list[SiteBody] = Field(default_factory=list)
 
 def _settings_rows(db: Session):
     return {x.key: x.value for x in db.query(SystemSetting).all()}
@@ -124,19 +124,27 @@ async def test_worker(body: SettingsBody, _: Principal = Depends(require("settin
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Worker connection failed: {exc}") from exc
 
+class ConnectionProbe(BaseModel):
+    worker_url: str = ""
+    worker_token: str | None = None
+    demo_mode: bool = False
+
 @router.post("/discover-dcs")
-async def discover_dcs(_: Principal = Depends(require("settings.write"))):
+async def discover_dcs(body: ConnectionProbe, _: Principal = Depends(require("settings.write"))):
     runtime = get_runtime_config()
-    if runtime.demo_mode:
+    demo_mode = body.demo_mode
+    if demo_mode:
         from .. import demo
         return [{"name":x["name"],"host":x["hostName"],"ip":x.get("ipv4",""),"site":x.get("site","Unknown")} for x in demo.DCS]
-    if not runtime.worker_url:
-        raise HTTPException(status_code=503, detail="Configure and save the Windows worker first")
+    worker_url = (body.worker_url or runtime.worker_url).rstrip("/")
+    worker_token = (body.worker_token or runtime.worker_token or "").strip()
+    if not worker_url:
+        raise HTTPException(status_code=503, detail="Windows worker URL is required")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(
-                f"{runtime.worker_url}/admin/discover-dcs",
-                headers={"Authorization": f"Bearer {runtime.worker_token}"},
+                f"{worker_url}/admin/discover-dcs",
+                headers={"Authorization": f"Bearer {worker_token}"},
             )
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text[:1200])
@@ -148,20 +156,25 @@ async def discover_dcs(_: Principal = Depends(require("settings.write"))):
 
 class DcTestBody(BaseModel):
     host: str = Field(min_length=1, max_length=255)
+    worker_url: str = ""
+    worker_token: str | None = None
+    demo_mode: bool = False
 
 @router.post("/test-dc")
 async def test_dc(body: DcTestBody, _: Principal = Depends(require("settings.write"))):
     runtime = get_runtime_config()
-    if runtime.demo_mode:
-        return {"ok": True, "host": body.host, "dns": True, "ldap": True, "kerberos": True, "smb": True, "globalCatalog": True}
-    if not runtime.worker_url:
-        raise HTTPException(status_code=503, detail="Configure and save the Windows worker first")
+    if body.demo_mode:
+        return {"ok": True, "host": body.host, "dns": True, "ldap": True, "kerberos": True, "smb": True, "ldaps": True, "globalCatalog": True, "site":"Demo"}
+    worker_url = (body.worker_url or runtime.worker_url).rstrip("/")
+    worker_token = (body.worker_token or runtime.worker_token or "").strip()
+    if not worker_url:
+        raise HTTPException(status_code=503, detail="Windows worker URL is required")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
-                f"{runtime.worker_url}/admin/test-dc",
+                f"{worker_url}/admin/test-dc",
                 json={"host": body.host},
-                headers={"Authorization": f"Bearer {runtime.worker_token}"},
+                headers={"Authorization": f"Bearer {worker_token}"},
             )
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text[:1200])
