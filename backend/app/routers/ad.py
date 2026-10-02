@@ -59,6 +59,10 @@ class OUDelete(BaseModel):
     dn: str
     recursive: bool = False
 
+class RestoreBody(BaseModel):
+    object_guid: str = Field(min_length=36, max_length=36)
+    target_path: str = ""
+
 @router.get("/users")
 async def users(q: str = Query(default="", max_length=80), _: Principal = Depends(require("ad.read"))):
     return await worker.request("GET", "/ad/users", params={"q": q})
@@ -188,4 +192,14 @@ async def create_ou(body: OUCreate, principal: Principal = Depends(require("ou.w
 async def delete_ou(body: OUDelete, principal: Principal = Depends(require("ou.write")), db: Session = Depends(get_db)):
     result = await worker.request("POST", "/ad/ous/delete", payload=body.model_dump())
     write_audit(db, principal, "ad.ou.delete", body.dn, details={"recursive": body.recursive})
+    return result
+
+@router.get("/deleted")
+async def deleted_objects(_: Principal = Depends(require("ad.read"))):
+    return await worker.request("GET", "/ad/deleted")
+
+@router.post("/deleted/restore")
+async def restore_object(body: RestoreBody, principal: Principal = Depends(require("ad.update")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/ad/deleted/restore", payload=body.model_dump())
+    write_audit(db, principal, "ad.object.restore", body.object_guid, details={"target_path": body.target_path})
     return result
