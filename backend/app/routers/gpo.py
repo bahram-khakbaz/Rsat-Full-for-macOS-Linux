@@ -25,6 +25,12 @@ class GpoStatus(BaseModel):
 class BackupBody(BaseModel):
     path: str = Field(min_length=3, max_length=1024)
 
+class GpoPermission(BaseModel):
+    trustee: str = Field(min_length=1, max_length=256)
+    target_type: Literal["User","Group","Computer"] = "Group"
+    permission: Literal["GpoRead","GpoApply","GpoEdit","GpoEditDeleteModifySecurity"] = "GpoRead"
+    replace: bool = False
+
 @router.get("")
 async def list_gpo(_: Principal = Depends(require("gpo.read"))):
     return await worker.request("GET", "/gpo")
@@ -72,3 +78,13 @@ async def backup(gpo_id: str, body: BackupBody, principal: Principal = Depends(r
 @router.get("/{gpo_id}/report")
 async def report(gpo_id: str, _: Principal = Depends(require("gpo.read"))):
     return await worker.request("GET", f"/gpo/{gpo_id}/report")
+
+@router.get("/{gpo_id}/permissions")
+async def permissions(gpo_id: str, _: Principal = Depends(require("gpo.read"))):
+    return await worker.request("GET", f"/gpo/{gpo_id}/permissions")
+
+@router.post("/{gpo_id}/permissions")
+async def set_permission(gpo_id: str, body: GpoPermission, principal: Principal = Depends(require("gpo.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", f"/gpo/{gpo_id}/permissions", payload=body.model_dump())
+    write_audit(db, principal, "gpo.permission.set", gpo_id, details=body.model_dump())
+    return result
