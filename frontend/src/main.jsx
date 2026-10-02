@@ -491,7 +491,7 @@ function SettingsPage({notify}){
   async function discover(){
     setBusy('discover')
     try{
-      const rows=await api('/api/settings/discover-dcs',{method:'POST'})
+      const rows=await api('/api/settings/discover-dcs',{method:'POST',body:JSON.stringify({worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,demo_mode:cfg.demo_mode})})
       const grouped={}
       for(const dc of rows){
         const site=dc.site||'Unknown'
@@ -509,7 +509,7 @@ function SettingsPage({notify}){
     const key=si+'-'+di
     setTests({...tests,[key]:{loading:true}})
     try{
-      const r=await api('/api/settings/test-dc',{method:'POST',body:JSON.stringify({host:dc.host})})
+      const r=await api('/api/settings/test-dc',{method:'POST',body:JSON.stringify({host:dc.host,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,demo_mode:cfg.demo_mode})})
       setTests(x=>({...x,[key]:r}))
       notify((r.ok?'DC REACHABLE: ':'DC CHECK FAILED: ')+dc.host,r.ok?'ok':'bad')
     }catch(e){setTests(x=>({...x,[key]:{ok:false,error:e.message}}));notify(e.message,'bad')}
