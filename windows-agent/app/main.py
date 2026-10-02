@@ -401,7 +401,19 @@ Remove-ADOrganizationalUnit -Identity $o -Recursive:([System.Convert]::ToBoolean
 def deleted_objects():
     return list_result(run_ps(r"""Import-Module ActiveDirectory
 $base=(Get-ADDomain).DistinguishedName
-Get-ADObject -Filter 'isDeleted -eq $true -and Name -ne "Deleted Objects"' -IncludeDeletedObjects -SearchBase $base -Properties lastKnownParent,whenChanged,objectClass,ObjectGUID | Select-Object @{n='name';e={$_.Name -replace '\\0ADEL:.*():
+Get-ADObject -Filter 'isDeleted -eq $true -and Name -ne "Deleted Objects"' -IncludeDeletedObjects -SearchBase $base -Properties lastKnownParent,whenChanged,objectClass,ObjectGUID | Select-Object @{n='name';e={($_.Name -split '\\0ADEL:')[0]}},@{n='objectClass';e={@($_.ObjectClass)[-1]}},@{n='lastKnownParent';e={$_.lastKnownParent}},@{n='deletedAt';e={$_.whenChanged}},@{n='objectGuid';e={$_.ObjectGUID.Guid}} | Sort-Object deletedAt -Descending | ConvertTo-Json -Depth 4 -Compress
+"""))
+
+@app.post("/ad/deleted/restore")
+def restore_deleted_object(body: RestoreBody):
+    return run_ps(r"""Import-Module ActiveDirectory
+$o=Get-ADObject -Identity $env:RSAT_OBJECT_GUID -IncludeDeletedObjects
+if($env:RSAT_TARGET_PATH){Restore-ADObject -Identity $o -TargetPath $env:RSAT_TARGET_PATH}else{Restore-ADObject -Identity $o}
+@{ok=$true}|ConvertTo-Json -Compress
+""",body.model_dump())
+
+@app.get("/dns/zones")
+def dns_zones():
     return list_result(run_ps(r"""Import-Module DnsServer
 Get-DnsServerZone | Select-Object @{n='name';e={$_.ZoneName}},@{n='type';e={[string]$_.ZoneType}},@{n='integrated';e={$_.IsDsIntegrated}},@{n='reverse';e={$_.IsReverseLookupZone}} | ConvertTo-Json -Depth 3 -Compress
 """))
