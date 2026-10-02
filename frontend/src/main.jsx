@@ -436,121 +436,207 @@ function GPOPage({notify}){
 function SettingsPage({notify}){
   const blankDc=()=>({name:'',host:'',ip:'',enabled:true,notes:''})
   const blankSite=()=>({name:'',code:'',description:'',dcs:[blankDc(),blankDc()]})
-  const[cfg,setCfg]=useState({demo_mode:true,worker_url:'',worker_token:'',worker_token_configured:false,sites:[]})
+  const[cfg,setCfg]=useState({
+    demo_mode:true,worker_url:'',worker_paired:false,worker_identity:null,
+    authentication_model:'domain-integrated-worker',sites:[]
+  })
+  const[pairingCode,setPairingCode]=useState('')
   const[loading,setLoading]=useState(true),[busy,setBusy]=useState(''),[tests,setTests]=useState({}),[workerTest,setWorkerTest]=useState(null)
 
   async function load(){
     setLoading(true)
     try{
       const r=await api('/api/settings')
-      setCfg({...r,worker_token:''})
+      setCfg(r)
     }catch(e){notify(e.message,'bad')}
     finally{setLoading(false)}
   }
   useEffect(()=>{load()},[])
 
   function updateSite(si,key,value){
-    const sites=cfg.sites.map((s,i)=>i===si?{...s,[key]:value}:s)
-    setCfg({...cfg,sites})
+    setCfg(x=>({...x,sites:x.sites.map((s,i)=>i===si?{...s,[key]:value}:s)}))
   }
   function updateDc(si,di,key,value){
-    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.map((d,j)=>j===di?{...d,[key]:value}:d)}:s)
-    setCfg({...cfg,sites})
+    setCfg(x=>({...x,sites:x.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.map((d,j)=>j===di?{...d,[key]:value}:d)}:s)}))
   }
-  function addSite(){setCfg({...cfg,sites:[...cfg.sites,blankSite()]})}
-  function removeSite(si){setCfg({...cfg,sites:cfg.sites.filter((_,i)=>i!==si)})}
-  function addDc(si){
-    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:[...s.dcs,blankDc()]}:s)
-    setCfg({...cfg,sites})
-  }
-  function removeDc(si,di){
-    const sites=cfg.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.filter((_,j)=>j!==di)}:s)
-    setCfg({...cfg,sites})
-  }
+  function addSite(){setCfg(x=>({...x,sites:[...x.sites,blankSite()]}))}
+  function removeSite(si){setCfg(x=>({...x,sites:x.sites.filter((_,i)=>i!==si)}))}
+  function addDc(si){setCfg(x=>({...x,sites:x.sites.map((s,i)=>i===si?{...s,dcs:[...s.dcs,blankDc()]}:s)}))}
+  function removeDc(si,di){setCfg(x=>({...x,sites:x.sites.map((s,i)=>i===si?{...s,dcs:s.dcs.filter((_,j)=>j!==di)}:s)}))}
+
   async function save(){
     setBusy('save')
     try{
       await api('/api/settings',{method:'PUT',body:JSON.stringify({
-        demo_mode:cfg.demo_mode,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,
-        sites:cfg.sites.map(s=>({name:s.name,code:s.code||'',description:s.description||'',dcs:s.dcs.map(d=>({name:d.name,host:d.host,ip:d.ip||'',enabled:d.enabled!==false,notes:d.notes||''}))}))
+        demo_mode:cfg.demo_mode,
+        worker_url:cfg.worker_url,
+        sites:cfg.sites.map(s=>({
+          name:s.name,code:s.code||'',description:s.description||'',
+          dcs:s.dcs.map(d=>({name:d.name,host:d.host,ip:d.ip||'',enabled:d.enabled!==false,notes:d.notes||''}))
+        }))
       })})
       notify('SETTINGS SAVED — ACTIVE WITHOUT RESTART','ok')
       await load()
     }catch(e){notify(e.message,'bad')}finally{setBusy('')}
   }
+
+  async function pairWorker(){
+    if(!cfg.worker_url){notify('WINDOWS WORKER URL IS REQUIRED','bad');return}
+    if(!pairingCode){notify('ENTER THE ONE-TIME PAIRING CODE SHOWN ON THE WINDOWS WORKER','bad');return}
+    setBusy('pair')
+    try{
+      const r=await api('/api/settings/pair-worker',{method:'POST',body:JSON.stringify({
+        worker_url:cfg.worker_url,pairing_code:pairingCode
+      })})
+      setPairingCode('')
+      setWorkerTest({ok:true,worker:{identity:r.worker_identity}})
+      notify('WINDOWS WORKER PAIRED SECURELY','ok')
+      await load()
+    }catch(e){notify(e.message,'bad')}finally{setBusy('')}
+  }
+
+  async function unpairWorker(){
+    setBusy('unpair')
+    try{
+      await api('/api/settings/unpair-worker',{method:'POST'})
+      setWorkerTest(null)
+      notify('WINDOWS WORKER UNPAIRED','ok')
+      await load()
+    }catch(e){notify(e.message,'bad')}finally{setBusy('')}
+  }
+
   async function testWorker(){
     setBusy('worker')
     try{
       const r=await api('/api/settings/test-worker',{method:'POST',body:JSON.stringify({
-        demo_mode:cfg.demo_mode,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,sites:[]
+        worker_url:cfg.worker_url,demo_mode:cfg.demo_mode
       })})
       setWorkerTest(r)
       notify('WINDOWS WORKER CONNECTION OK','ok')
     }catch(e){setWorkerTest({ok:false,error:e.message});notify(e.message,'bad')}finally{setBusy('')}
   }
+
   async function discover(){
     setBusy('discover')
     try{
-      const rows=await api('/api/settings/discover-dcs',{method:'POST',body:JSON.stringify({worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,demo_mode:cfg.demo_mode})})
+      const rows=await api('/api/settings/discover-dcs',{method:'POST',body:JSON.stringify({
+        worker_url:cfg.worker_url,demo_mode:cfg.demo_mode
+      })})
       const grouped={}
       for(const dc of rows){
         const site=dc.site||'Unknown'
         if(!grouped[site]) grouped[site]=[]
-        grouped[site].push({name:dc.name||'',host:dc.host||'',ip:dc.ip||'',enabled:dc.enabled!==false,notes:dc.globalCatalog?'Global Catalog':''})
+        grouped[site].push({
+          name:dc.name||'',host:dc.host||'',ip:dc.ip||'',enabled:dc.enabled!==false,
+          notes:dc.globalCatalog?'Global Catalog':''
+        })
       }
-      const sites=Object.entries(grouped).map(([name,dcs])=>({name,code:name.toUpperCase().replace(/[^A-Z0-9]+/g,'-').slice(0,20),description:'Discovered from Active Directory',dcs}))
-      setCfg({...cfg,sites})
+      const sites=Object.entries(grouped).map(([name,dcs])=>({
+        name,code:name.toUpperCase().replace(/[^A-Z0-9]+/g,'-').slice(0,20),
+        description:'Discovered from Active Directory',dcs
+      }))
+      setCfg(x=>({...x,sites}))
       notify('DOMAIN CONTROLLERS DISCOVERED — REVIEW AND SAVE','ok')
     }catch(e){notify(e.message,'bad')}finally{setBusy('')}
   }
+
   async function testDc(si,di){
     const dc=cfg.sites[si].dcs[di]
     if(!dc.host){notify('DC HOST/FQDN IS REQUIRED','bad');return}
     const key=si+'-'+di
-    setTests({...tests,[key]:{loading:true}})
+    setTests(x=>({...x,[key]:{loading:true}}))
     try{
-      const r=await api('/api/settings/test-dc',{method:'POST',body:JSON.stringify({host:dc.host,worker_url:cfg.worker_url,worker_token:cfg.worker_token||null,demo_mode:cfg.demo_mode})})
+      const r=await api('/api/settings/test-dc',{method:'POST',body:JSON.stringify({
+        host:dc.host,worker_url:cfg.worker_url,demo_mode:cfg.demo_mode
+      })})
       setTests(x=>({...x,[key]:r}))
       notify((r.ok?'DC REACHABLE: ':'DC CHECK FAILED: ')+dc.host,r.ok?'ok':'bad')
-    }catch(e){setTests(x=>({...x,[key]:{ok:false,error:e.message}}));notify(e.message,'bad')}
+    }catch(e){
+      setTests(x=>({...x,[key]:{ok:false,error:e.message}}))
+      notify(e.message,'bad')
+    }
   }
 
   const totalDcs=cfg.sites.reduce((n,s)=>n+s.dcs.length,0)
   const activeDcs=cfg.sites.reduce((n,s)=>n+s.dcs.filter(d=>d.enabled!==false).length,0)
+  const identity=cfg.worker_identity||workerTest?.worker?.identity||null
+  const canUseWorker=cfg.demo_mode||cfg.worker_paired
+
   if(loading)return <div className="loading">LOADING SYSTEM CONFIGURATION...</div>
+
   return <div className="settings-page">
     <section className="window-frame settings-connection">
-      <div className="window-title"><span>CONNECTION PROFILE</span><span>CONFIGURATION</span></div>
-      <div className="settings-summary">
+      <div className="window-title"><span>CONNECTION / IDENTITY MODEL</span><span>DOMAIN-INTEGRATED</span></div>
+
+      <div className="settings-summary settings-summary-five">
         <div><span>MODE</span><b>{cfg.demo_mode?'DEMO':'PRODUCTION'}</b></div>
+        <div><span>WORKER</span><b className={cfg.worker_paired?'green-text':''}>{cfg.demo_mode?'SIMULATED':cfg.worker_paired?'PAIRED':'NOT PAIRED'}</b></div>
         <div><span>SITES</span><b>{cfg.sites.length}</b></div>
         <div><span>DOMAIN CONTROLLERS</span><b>{totalDcs}</b></div>
         <div><span>ENABLED DCS</span><b>{activeDcs}</b></div>
       </div>
-      <div className="connection-config">
-        <label className="settings-check"><input type="checkbox" checked={cfg.demo_mode} onChange={e=>setCfg({...cfg,demo_mode:e.target.checked})}/><span>DEMO MODE</span><small>Disable this to use the real Windows RSAT worker.</small></label>
-        <label><span>WINDOWS WORKER URL</span><input value={cfg.worker_url||''} onChange={e=>setCfg({...cfg,worker_url:e.target.value})} placeholder="http://windows-management-host:8765"/></label>
-        <label><span>WORKER TOKEN</span><input type="password" value={cfg.worker_token||''} onChange={e=>setCfg({...cfg,worker_token:e.target.value})} placeholder={cfg.worker_token_configured?'••••••••  token already configured':'enter worker token'}/><small>{cfg.worker_token_configured?'Leave blank to keep the saved encrypted token.':'Token is encrypted before database storage.'}</small></label>
-        <div className="connection-buttons">
-          <Button icon={Wifi} onClick={testWorker} disabled={busy==='worker'}>{busy==='worker'?'TESTING...':'TEST WORKER'}</Button>
-          <Button icon={Search} onClick={discover} disabled={busy==='discover'}>{busy==='discover'?'DISCOVERING...':'DISCOVER DCS FROM AD'}</Button>
-          <Button icon={Download} kind="primary" onClick={save} disabled={busy==='save'}>{busy==='save'?'SAVING...':'SAVE SETTINGS'}</Button>
+
+      <div className="identity-model-note">
+        <ShieldCheck size={18}/>
+        <div>
+          <b>NO ACTIVE DIRECTORY PASSWORD IS STORED ON THE MAC</b>
+          <span>The Windows Worker runs under a domain identity (recommended: gMSA or delegated service account). AD, DNS, DHCP and GPO cmdlets use Windows Integrated Authentication / Kerberos.</span>
         </div>
       </div>
+
+      <div className="connection-config pairing-config">
+        <label className="settings-check">
+          <input type="checkbox" checked={cfg.demo_mode} onChange={e=>setCfg({...cfg,demo_mode:e.target.checked})}/>
+          <span>DEMO MODE</span>
+          <small>Disable this after the Windows Worker is installed and paired.</small>
+        </label>
+
+        <label>
+          <span>WINDOWS WORKER URL</span>
+          <input value={cfg.worker_url||''} onChange={e=>setCfg({...cfg,worker_url:e.target.value})} placeholder="http://windows-management-host:8765"/>
+          <small>Use a dedicated domain-joined Windows management host, not a Domain Controller.</small>
+        </label>
+
+        <label>
+          <span>ONE-TIME PAIRING CODE</span>
+          <input type="password" autoComplete="off" value={pairingCode} onChange={e=>setPairingCode(e.target.value)} placeholder={cfg.worker_paired?'restart worker only if re-pairing is required':'shown when run-worker.ps1 starts'}/>
+          <small>The code expires after 15 minutes, works once, and is never stored.</small>
+        </label>
+
+        <div className="connection-buttons">
+          {!cfg.worker_paired&&!cfg.demo_mode&&<Button icon={KeyRound} kind="primary" onClick={pairWorker} disabled={busy==='pair'}>{busy==='pair'?'PAIRING...':'PAIR WORKER'}</Button>}
+          {cfg.worker_paired&&!cfg.demo_mode&&<Button icon={Wifi} onClick={testWorker} disabled={busy==='worker'}>{busy==='worker'?'TESTING...':'TEST WORKER'}</Button>}
+          {cfg.worker_paired&&!cfg.demo_mode&&<Button icon={Trash2} kind="danger" onClick={unpairWorker} disabled={busy==='unpair'}>{busy==='unpair'?'UNPAIRING...':'UNPAIR'}</Button>}
+          <Button icon={Search} onClick={discover} disabled={busy==='discover'||!canUseWorker}>{busy==='discover'?'DISCOVERING...':'DISCOVER DCS FROM AD'}</Button>
+          <Button icon={Download} onClick={save} disabled={busy==='save'}>{busy==='save'?'SAVING...':'SAVE SETTINGS'}</Button>
+        </div>
+      </div>
+
+      {identity&&<div className="worker-identity">
+        <div><span>WORKER COMPUTER</span><b>{identity.computer||'—'}</b></div>
+        <div><span>RUN-AS IDENTITY</span><b>{identity.runAs||'—'}</b></div>
+        <div><span>AD DOMAIN</span><b>{identity.domain||'—'}</b></div>
+        <div><span>AUTHENTICATION</span><b className="green-text">WINDOWS INTEGRATED / KERBEROS</b></div>
+      </div>}
+
       {workerTest&&<div className={'connection-result '+(workerTest.ok?'ok':'bad')}>
         <b>{workerTest.ok?'WORKER ONLINE':'WORKER ERROR'}</b>
-        <span>{workerTest.ok?JSON.stringify(workerTest.worker):workerTest.error}</span>
+        <span>{workerTest.ok?'Authenticated management channel is operational.':workerTest.error}</span>
       </div>}
     </section>
 
     <section className="window-frame sites-config">
       <div className="window-title"><span>SITE / DOMAIN CONTROLLER MATRIX</span><span>{cfg.sites.length} SITES / {totalDcs} DCS</span></div>
       <div className="sites-toolbar">
-        <div><b>MULTI-SITE DIRECTORY TOPOLOGY</b><span>Each site can contain two or more domain controllers. Use FQDN whenever possible.</span></div>
+        <div>
+          <b>MULTI-SITE DIRECTORY TOPOLOGY</b>
+          <span>Recommended workflow: pair the domain-joined Worker → Discover DCs from AD → review all sites/DCs → Save. Manual entry remains available.</span>
+        </div>
         <Button icon={Plus} onClick={addSite}>ADD SITE</Button>
       </div>
+
       <div className="site-list">
-        {!cfg.sites.length&&<div className="empty">NO SITES CONFIGURED — ADD A SITE OR DISCOVER DCS FROM ACTIVE DIRECTORY</div>}
+        {!cfg.sites.length&&<div className="empty">NO SITES CONFIGURED — PAIR THE WORKER AND DISCOVER ACTIVE DIRECTORY, OR ADD A SITE MANUALLY</div>}
         {cfg.sites.map((site,si)=><section className="site-card" key={si}>
           <div className="site-head">
             <div className="site-fields">
@@ -558,8 +644,13 @@ function SettingsPage({notify}){
               <label><span>CODE</span><input value={site.code||''} onChange={e=>updateSite(si,'code',e.target.value)} placeholder="HQ"/></label>
               <label className="site-description"><span>DESCRIPTION</span><input value={site.description||''} onChange={e=>updateSite(si,'description',e.target.value)} placeholder="Optional description"/></label>
             </div>
-            <div className="site-tools"><span>{site.dcs.length} DC</span><Button icon={Plus} onClick={()=>addDc(si)}>ADD DC</Button><Button icon={Trash2} kind="danger" onClick={()=>removeSite(si)}>REMOVE SITE</Button></div>
+            <div className="site-tools">
+              <span>{site.dcs.length} DC</span>
+              <Button icon={Plus} onClick={()=>addDc(si)}>ADD DC</Button>
+              <Button icon={Trash2} kind="danger" onClick={()=>removeSite(si)}>REMOVE SITE</Button>
+            </div>
           </div>
+
           <div className="dc-table">
             <div className="dc-header"><span>ENABLED</span><span>DC NAME</span><span>HOST / FQDN</span><span>IP ADDRESS</span><span>NOTES</span><span>HEALTH</span><span>ACTIONS</span></div>
             {site.dcs.map((dc,di)=>{
@@ -569,15 +660,25 @@ function SettingsPage({notify}){
                 <input value={dc.name||''} onChange={e=>updateDc(si,di,'name',e.target.value)} placeholder="DC01"/>
                 <input value={dc.host||''} onChange={e=>updateDc(si,di,'host',e.target.value)} placeholder="dc01.domain.local"/>
                 <input value={dc.ip||''} onChange={e=>updateDc(si,di,'ip',e.target.value)} placeholder="10.x.x.x"/>
-                <input value={dc.notes||''} onChange={e=>updateDc(si,di,'notes',e.target.value)} placeholder="GC / primary / notes"/>
-                <div className="dc-health">{!result?<span className="health unknown">NOT TESTED</span>:result.loading?<span className="health unknown">TESTING</span>:<span className={'health '+(result.ok?'good':'bad')}>{result.ok?'ONLINE':'FAILED'}</span>}{result&&result.ok&&<small>LDAP {result.ldap?'✓':'×'} · KRB {result.kerberos?'✓':'×'} · GC {result.globalCatalog?'✓':'×'}</small>}</div>
-                <div className="dc-actions"><button title="Test DC" onClick={()=>testDc(si,di)}><Activity size={13}/></button><button title="Remove DC" onClick={()=>removeDc(si,di)}><Trash2 size={13}/></button></div>
+                <input value={dc.notes||''} onChange={e=>updateDc(si,di,'notes',e.target.value)} placeholder="GC / preferred / notes"/>
+                <div className="dc-health">
+                  {!result?<span className="health unknown">NOT TESTED</span>:result.loading?<span className="health unknown">TESTING</span>:<span className={'health '+(result.ok?'good':'bad')}>{result.ok?'ONLINE':'FAILED'}</span>}
+                  {result&&result.ok&&<small>DNS {result.dns?'✓':'×'} · LDAP {result.ldap?'✓':'×'} · KRB {result.kerberos?'✓':'×'} · GC {result.globalCatalog?'✓':'×'}</small>}
+                </div>
+                <div className="dc-actions">
+                  <button title="Test DC" disabled={!canUseWorker} onClick={()=>testDc(si,di)}><Activity size={13}/></button>
+                  <button title="Remove DC" onClick={()=>removeDc(si,di)}><Trash2 size={13}/></button>
+                </div>
               </div>
             })}
           </div>
         </section>)}
       </div>
-      <div className="settings-footer"><span>Changes are stored in PostgreSQL and become active immediately after save.</span><Button icon={Download} kind="primary" onClick={save} disabled={busy==='save'}>SAVE ALL CHANGES</Button></div>
+
+      <div className="settings-footer">
+        <span>Topology is stored in PostgreSQL. AD credentials remain on Windows and are never entered into this panel.</span>
+        <Button icon={Download} kind="primary" onClick={save} disabled={busy==='save'}>SAVE ALL CHANGES</Button>
+      </div>
     </section>
   </div>
 }
