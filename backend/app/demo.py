@@ -14,9 +14,27 @@ REPLICATION = [
 TRUSTS = [{"name":"example.local","direction":"Bidirectional","type":"ParentChild","transitive":True}]
 SITES = [{"name":"HQ","subnets":3},{"name":"DR","subnets":1}]
 USERS = [
-    {"samAccountName":"admin.user","displayName":"Admin User","mail":"admin.user@example.local","department":"IT","title":"IT Supervisor","company":"Example","enabled":True,"lockedOut":False,"ou":"OU=IT,OU=Users,DC=example,DC=local"},
-    {"samAccountName":"a.rezaei","displayName":"Ali Rezaei","mail":"a.rezaei@example.local","department":"Operations","title":"Operations Specialist","company":"Example","enabled":True,"lockedOut":True,"ou":"OU=Operations,OU=Users,DC=example,DC=local"},
-    {"samAccountName":"s.ahmadi","displayName":"Sara Ahmadi","mail":"s.ahmadi@example.local","department":"Finance","title":"Financial Analyst","company":"Example","enabled":False,"lockedOut":False,"ou":"OU=Finance,OU=Users,DC=example,DC=local"},
+    {
+        "samAccountName": f"user{i:02d}",
+        "displayName": f"Demo User {i:02d}",
+        "mail": f"user{i:02d}@example.local",
+        "department": ["IT","Infrastructure","HR","Finance","Operations","Sales"][i % 6],
+        "title": ["System Administrator","System Engineer","HR Specialist","Financial Analyst","Operations Specialist","Network Engineer"][i % 6],
+        "company": "Example",
+        "manager": "CN=Demo Manager,OU=Users,DC=example,DC=local",
+        "mobile": f"+1 555 01{i:02d}",
+        "employeeId": str(1000+i),
+        "enabled": i not in (9,14),
+        "lockedOut": i == 2,
+        "lastLogon": f"2026-10-{1 + (i % 2):02d}T{8 + (i % 10):02d}:12:00Z",
+        "created": f"202{1 + (i % 4)}-04-12T09:11:00Z",
+        "passwordLastSet": "2026-09-20T07:30:00Z",
+        "passwordExpires": "2026-12-19T07:30:00Z",
+        "passwordNeverExpires": False,
+        "dn": f"CN=Demo User {i:02d},OU=Users,DC=example,DC=local",
+        "ou": "OU=Users,DC=example,DC=local",
+    }
+    for i in range(1, 16)
 ]
 GROUPS = [
     {"name":"IT-Admins","description":"Infrastructure administrators","scope":"Global","category":"Security","members":4},
@@ -63,3 +81,14 @@ FINE_GRAINED_POLICIES = [{"name":"Privileged-Accounts","precedence":10,"minPassw
 SUBNETS = [{"name":"10.20.0.0/24","site":"HQ"},{"name":"10.30.0.0/24","site":"HQ"},{"name":"10.40.0.0/24","site":"DR"}]
 DELETED_OBJECTS = [{"name":"Former User","objectClass":"user","lastKnownParent":"OU=Users,DC=example,DC=local","deletedAt":"2026-09-29T12:00:00Z","objectGuid":"11111111-1111-1111-1111-111111111111"}]
 GPO_PERMISSIONS = [{"trustee":"EXAMPLE\\Domain Admins","type":"Group","permission":"GpoEditDeleteModifySecurity","inherited":False},{"trustee":"Authenticated Users","type":"WellKnownGroup","permission":"GpoApply","inherited":False}]
+
+AUDIT = [
+    {"id":1,"at":"2026-10-02T08:42:11Z","actor":"admin","role":"admin","action":"Reset Password","target":"user02","status":"success","details":{}},
+    {"id":2,"at":"2026-10-02T08:40:45Z","actor":"admin","role":"admin","action":"Unlock Account","target":"user14","status":"success","details":{}},
+    {"id":3,"at":"2026-10-02T08:38:32Z","actor":"admin","role":"admin","action":"Enable User","target":"user03","status":"success","details":{}},
+    {"id":4,"at":"2026-10-02T08:35:19Z","actor":"helpdesk","role":"helpdesk","action":"Add to Group","target":"user04","status":"success","details":{}},
+    {"id":5,"at":"2026-10-02T08:22:03Z","actor":"admin","role":"admin","action":"Create User","target":"user15","status":"success","details":{}},
+    {"id":6,"at":"2026-10-02T08:19:47Z","actor":"helpdesk","role":"helpdesk","action":"Disable User","target":"user09","status":"success","details":{}},
+    {"id":7,"at":"2026-10-02T08:15:28Z","actor":"admin","role":"admin","action":"Modify Attributes","target":"user01","status":"success","details":{}},
+    {"id":8,"at":"2026-10-02T08:12:11Z","actor":"admin","role":"admin","action":"Move User","target":"user08","status":"success","details":{}},
+]
