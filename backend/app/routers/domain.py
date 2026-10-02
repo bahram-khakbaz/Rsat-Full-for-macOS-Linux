@@ -23,3 +23,15 @@ async def trusts(_: Principal = Depends(require("domain.read"))):
 @router.get("/sites")
 async def sites(_: Principal = Depends(require("domain.read"))):
     return await worker.request("GET", "/domain/sites")
+
+@router.get("/subnets")
+async def subnets(_: Principal = Depends(require("domain.read"))):
+    return await worker.request("GET", "/domain/subnets")
+
+@router.get("/password-policy")
+async def password_policy(_: Principal = Depends(require("domain.read"))):
+    return await worker.request("GET", "/domain/password-policy")
+
+@router.get("/password-policies")
+async def password_policies(_: Principal = Depends(require("domain.read"))):
+    return await worker.request("GET", "/domain/password-policies")
