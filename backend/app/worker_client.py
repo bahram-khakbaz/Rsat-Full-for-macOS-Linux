@@ -1,21 +1,20 @@
 import httpx
 from fastapi import HTTPException
 from .config import settings
+from .runtime_config import get_runtime_config
 from . import demo
 
 class WorkerClient:
-    def __init__(self):
-        self.base = settings.worker_url.rstrip("/")
-
     async def request(self, method: str, path: str, payload=None, params=None):
-        if settings.demo_mode:
+        runtime = get_runtime_config()
+        if runtime.demo_mode:
             return self._demo(method, path, payload, params)
-        if not self.base:
+        if not runtime.worker_url:
             raise HTTPException(status_code=503, detail="Windows worker is not configured")
-        headers = {"Authorization": f"Bearer {settings.worker_token}"}
+        headers = {"Authorization": f"Bearer {runtime.worker_token}"}
         try:
             async with httpx.AsyncClient(timeout=45) as client:
-                response = await client.request(method, f"{self.base}{path}", json=payload, params=params, headers=headers)
+                response = await client.request(method, f"{runtime.worker_url}{path}", json=payload, params=params, headers=headers)
             if response.status_code >= 400:
                 try:
                     detail = response.json().get("detail", response.text)
