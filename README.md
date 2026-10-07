@@ -2,9 +2,9 @@
 
 A cross-platform administration center for Microsoft Active Directory environments, designed to make the daily ADAC / ADUC / DNS / DHCP / Group Policy workflow usable from macOS and Linux.
 
-The control plane and UI run on macOS/Linux. Microsoft-native RSAT operations run on a dedicated, domain-joined Windows worker through a strict allow-listed API.
+The control plane and UI run on macOS/Linux. Direct mode connects to Active Directory using LDAPS and manages DNS/DHCP through encrypted Kerberos RPC, without a Windows intermediary. An optional Windows worker supports additional RSAT and Group Policy operations.
 
-> This is not a binary port of MMC. It is a web-native administration layer over supported Microsoft PowerShell/RSAT modules.
+> This is not a binary port of MMC. It is a web-native administration layer using directory protocols and optional Microsoft PowerShell/RSAT modules.
 
 ## Interface
 
@@ -40,7 +40,9 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 - Zone inventory
 - AD-integrated primary zone creation
 - Zone deletion
-- A / AAAA / CNAME / PTR inventory
+- Direct record inventory and create/edit/delete: A, AAAA, CNAME, PTR, NS, MX, SRV and TXT
+- SOA and unknown record types are read-only
+- Zone create/delete requires the Windows worker or optional WinRM connector
 - Record creation
 - Record deletion
 
@@ -71,13 +73,21 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 - In-panel connection settings; no manual `.env` editing after initial bootstrap
 - Windows worker URL + one-time pairing code; no worker secret is typed or managed manually
 - The paired worker secret is generated automatically and stored encrypted by the control plane
-- AD credentials stay on Windows; macOS never stores an AD username/password
+- Direct mode stores domain credentials encrypted in the local backend; the frontend never receives saved passwords
+- In worker mode, AD credentials stay on Windows
 - Worker runs under Windows Integrated Authentication using a delegated domain service account or gMSA
 - Demo / production mode switching from UI
 - Multiple sites with any number of domain controllers per site
 - Automatic domain controller discovery from Active Directory
 - Per-DC connectivity checks for DNS, LDAP, Kerberos, SMB, LDAPS and Global Catalog
 - Site/DC configuration stored in PostgreSQL and applied without restarting the control plane
+
+### SSH and native macOS app
+
+- Switch inventory, encrypted credentials and verified host keys
+- Interactive SSH terminal with per-operator access
+- Native RSAT.app launcher starts the existing Colima profile and services, then opens the panel
+- Saved database and configuration survive app closure and Mac restarts
 
 ### Platform
 
@@ -94,45 +104,9 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 
 ## Architecture
 
-```text
-macOS / Linux
-    Browser
-       |
-       v
- Retro React UI + Nginx :8080
-       |
-       v
- FastAPI control plane
-   |           |
-   |           +--> PostgreSQL audit log
-   |
-   +------------------------------+
-                                  |
-                                  v
-                         Windows Admin Worker
-                         domain joined + RSAT
-                                  |
-          +-----------------------+----------------------+
-          |                       |                      |
-    Active Directory          DNS / DHCP          Group Policy
-```
+The browser or native macOS app connects to Nginx and FastAPI, with PostgreSQL holding configuration and audit data. Direct mode connects to AD over validated LDAPS, DNS through Samba RPC, DHCP through Impacket RPC, and switches over SSH. Optional worker mode uses the allow-listed Windows management API.
 
-The Windows worker is modular:
-
-```text
-windows-agent/app/
-├── main.py
-├── common.py
-├── models.py
-├── runner.py
-└── routers/
-    ├── ad.py
-    ├── domain.py
-    ├── network.py
-    └── gpo.py
-```
-
-See [Architecture](docs/ARCHITECTURE.md).
+See [Direct Mac connection](docs/direct-mac.md) for supported operations and limitations. The lists above include worker capabilities; direct mode has a narrower scope.
 
 ## Start on macOS
 
@@ -165,29 +139,11 @@ The complete UI can therefore be explored without a domain controller or Windows
 
 ## Connect a real AD environment
 
-Use a dedicated domain-joined Windows management host. Do not run the worker on a domain controller.
+For direct access, open **Settings**, choose Direct Mac Connection, enter your domain and UPN, and save the password locally. Supply a trusted corporate CA or explicitly approve a DC certificate fingerprint after independent verification. Disable Demo mode and select enabled DCs. AD requests connect automatically; no per-DC pairing is required. Configure DNS and the actual authorized DHCP service host in the service settings. Company DNS and network/VPN access must be available from the containers.
 
-On Windows:
+Read [Direct Mac connection](docs/direct-mac.md) for permissions, protocol requirements and limitations, and [macOS deployment](docs/MACOS_DEPLOYMENT.md) to build the one-click app.
 
-```powershell
-cd windows-agent
-Copy-Item .env.example .env
-notepad .env
-.\install-rsat.ps1
-.\run-worker.ps1
-```
-
-After the first bootstrap, open **Settings** in the web UI.
-
-1. On the domain-joined Windows management host, start `run-worker.ps1`.
-2. The worker automatically creates its internal secret and prints a one-time pairing code.
-3. In Settings, enter only the Worker URL and that one-time pairing code.
-4. Pair the worker, switch from Demo to Production, then use **Discover DCs from AD**.
-5. Review the discovered sites/DCs and save the topology.
-
-You never type an AD password into the macOS panel. For an initial lab/test, run the worker under your signed-in domain account. For production, run it under a delegated service account or gMSA with only the rights required by the workflows.
-
-Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEPLOYMENT.md), and [Security](docs/SECURITY.md) before production use.
+For additional Windows RSAT/GPO features, start `windows-agent/run-worker.ps1` on a dedicated domain-joined management host, pair its URL and one-time code in Settings, and use a delegated service account or gMSA. See [Windows Worker](docs/WINDOWS_WORKER.md).
 
 ## Security model
 
@@ -196,7 +152,8 @@ Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEP
 - Worker calls are protected by an internal high-entropy credential created automatically on Windows.
 - The operator never manages that credential directly; a one-time pairing code exchanges it with the control plane.
 - Pairing codes expire after 15 minutes and are single-use.
-- Active Directory credentials are never stored on macOS or in the web UI.
+- Direct-mode credentials are encrypted locally and never returned to the web UI. Keep JWT_SECRET stable and protect the environment file and database backups.
+- LDAPS trust is verified before binding; RPC requires Kerberos and packet privacy; SSH verifies approved host keys before sending passwords.
 - The Windows worker uses the security token of its own domain account (preferably a delegated service account/gMSA).
 - Command values are supplied through process environment variables rather than interpolated into PowerShell source.
 - Control-plane permissions separate helpdesk, network, GPO, audit and administrator capabilities.
@@ -204,7 +161,7 @@ Read [Windows Worker](docs/WINDOWS_WORKER.md), [macOS Deployment](docs/MACOS_DEP
 - Password values are redacted from audit data.
 - The default macOS deployment binds the UI to localhost only.
 
-For production, add organizational OIDC/SSO, TLS, firewall restrictions and a least-privilege delegated worker identity.
+For shared production deployments, add organizational OIDC/SSO, TLS and firewall restrictions. Delegate only the directory/service rights needed by the chosen mode.
 
 ## Scope boundary
 
@@ -221,7 +178,8 @@ backend/          FastAPI control plane, RBAC and audit
 frontend/         Cross-platform retro administration UI
 windows-agent/    Windows-only allow-listed RSAT execution layer
 docs/             Architecture, security and deployment docs
-scripts/          Bootstrap and verification utilities
+scripts/          Bootstrap, macOS app builder and verification utilities
+macos/            Native app source, startup helper and isolated tests
 ```
 
 ## Verify

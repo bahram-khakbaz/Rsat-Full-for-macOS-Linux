@@ -8,6 +8,7 @@ class RuntimeConfig:
     demo_mode: bool
     worker_url: str
     worker_token: str
+    connection_mode: str = "worker"
 
 def get_runtime_config() -> RuntimeConfig:
     with SessionLocal() as db:
@@ -18,4 +19,5 @@ def get_runtime_config() -> RuntimeConfig:
         demo_mode=(rows.get("demo_mode", str(settings.demo_mode)).lower() == "true"),
         worker_url=rows.get("worker_url", settings.worker_url).rstrip("/"),
         worker_token=token,
+        connection_mode=rows.get("connection_mode", "worker"),
     )

@@ -1,4 +1,5 @@
 import httpx
+from starlette.concurrency import run_in_threadpool
 from fastapi import HTTPException
 from .config import settings
 from .runtime_config import get_runtime_config
@@ -9,6 +10,12 @@ class WorkerClient:
         runtime = get_runtime_config()
         if runtime.demo_mode:
             return self._demo(method, path, payload, params)
+        if runtime.connection_mode == "native":
+            if path.startswith(("/dns/", "/dhcp/")):
+                from .native_network import request
+                return await run_in_threadpool(request, method, path, payload, params)
+            from .native_ad import request
+            return await run_in_threadpool(request, method, path, payload, params)
         if not runtime.worker_url:
             raise HTTPException(status_code=503, detail="Windows worker is not configured")
         headers = {"Authorization": f"Bearer {runtime.worker_token}"}

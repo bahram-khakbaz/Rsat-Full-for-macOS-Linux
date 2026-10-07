@@ -55,7 +55,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .connection-strip u{color:#7fd0ff;text-underline-offset:2px}
 
 .module-tabs{
-  display:grid;grid-template-columns:repeat(11,minmax(88px,1fr));
+  display:grid;grid-template-columns:repeat(12,minmax(88px,1fr));
   gap:8px;padding:6px 8px;border:1px solid var(--line);
   background:#001112;
 }
@@ -342,7 +342,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:1500px){
   .connection-config{grid-template-columns:190px minmax(220px,1fr) minmax(220px,1fr);align-items:end}
   .connection-buttons{grid-column:1/-1;justify-content:flex-start}
-  .module-tabs{grid-template-columns:repeat(11,minmax(75px,1fr))}
+  .module-tabs{grid-template-columns:repeat(12,minmax(75px,1fr))}
   .module-tabs button{font-size:8px;gap:4px}
 }
 
@@ -374,3 +374,41 @@ button:disabled{cursor:not-allowed;opacity:.45}
   .worker-identity>div:nth-child(2){border-right:0}
   .worker-identity>div:nth-child(-n+2){border-bottom:1px solid #284849}
 }
+
+/* Settings grow with certificate details; keep one scroll area for the whole page. */
+.settings-page{height:auto;overflow:visible;display:flex;flex-direction:column;align-items:stretch}
+.settings-page>section{flex:none}
+.settings-page .sites-config{display:block}
+.settings-page .site-list{overflow:visible;min-height:140px}
+.direct-connection .connection-config{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+.direct-connection .connection-buttons{grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start;white-space:normal}
+.direct-connection .connection-config input,.direct-connection .connection-config select,.direct-connection .connection-config textarea{min-width:0;width:100%;border:1px solid #527475;background:#001213;color:#dbe7e7;padding:8px;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+.direct-connection .connection-config textarea{resize:vertical;min-height:88px}
+.direct-connection .connection-config small{font-size:9px;line-height:1.5}
+.direct-connection .identity-model-note span{font-size:10px;line-height:1.5}
+.direct-connection .kv>div{font-size:10px}
+.identity-model-note>:only-child{grid-column:1/-1;min-width:0}
+
+.directory-loading{padding:8px 12px;color:var(--cyan);font-size:10px;background:#062324;border-bottom:1px solid var(--line)}
+.users-screen .directory-users{position:relative}
+.users-screen .directory-loading{position:absolute;top:74px;left:0;right:0;z-index:2}
+.users-screen .error-box{position:absolute;top:74px;left:0;right:0;z-index:2}
+
+.service-connection{display:grid;grid-template-columns:2fr 2fr 100px auto;gap:12px;padding:16px;align-items:end}.service-connection small{grid-column:1/-1;color:var(--muted)}
+.ssh-terminal{height:450px;padding:14px;background:#071516}.ssh-fingerprint{grid-column:1/-1;display:flex;flex-direction:column;gap:16px;overflow-wrap:anywhere}.ssh-fingerprint code{color:#7ce2be;font-size:14px}.ssh-fingerprint span{color:var(--muted)}
+
+.service-connection{grid-template-columns:2fr 2fr 130px 80px auto}.discovered-dhcp{grid-column:1/-1}
+
+.service-details>summary{padding:10px;border:1px solid #557879;background:#041718;cursor:pointer;font-size:10px;color:#d4e0e0}
+.dns-page .split{grid-template-columns:minmax(0,1fr);align-items:start}
+.dns-page .table-shell{max-height:45vh;overflow:auto}
+.dns-page .table-shell thead{position:sticky;top:0;z-index:1}
+.dns-page .pagination-bar{position:sticky;bottom:0;background:#041718;z-index:1}
+.dns-page .panel-title{align-items:start;flex-wrap:wrap}
+.dns-page .panel-actions{flex-wrap:wrap}
+.dns-page .inspector .kv{display:grid;grid-template-columns:1fr 1fr}
+
+.ssh-login-status{display:block;margin-bottom:8px;font-size:10px;color:#d4e0e0}
+
+.ssh-page .table-shell{max-height:35vh;overflow:auto}
+.ssh-page .table-shell thead{position:sticky;top:0;z-index:1}

@@ -64,8 +64,8 @@ class RestoreBody(BaseModel):
     target_path: str = ""
 
 @router.get("/users")
-async def users(q: str = Query(default="", max_length=80), _: Principal = Depends(require("ad.read"))):
-    return await worker.request("GET", "/ad/users", params={"q": q})
+async def users(q: str = Query(default="", max_length=80), page_size: int | None = Query(default=None, ge=1, le=100), cursor: str = Query(default="", max_length=4096), _: Principal = Depends(require("ad.read"))):
+    return await worker.request("GET", "/ad/users", params={"q": q, "page_size":page_size, "cursor":cursor})
 
 @router.post("/users")
 async def create_user(body: UserCreate, principal: Principal = Depends(require("ad.create")), db: Session = Depends(get_db)):
@@ -160,16 +160,16 @@ async def remove_group_member(name: str, member: str, principal: Principal = Dep
 async def computers(q: str = Query(default="", max_length=80), _: Principal = Depends(require("computer.read"))):
     return await worker.request("GET", "/ad/computers", params={"q": q})
 
-@router.post("/computers/{name}/{action}")
-async def computer_action(name: str, action: Literal["enable","disable","reset"], principal: Principal = Depends(require("computer.write")), db: Session = Depends(get_db)):
-    result = await worker.request("POST", f"/ad/computers/{name}/{action}")
-    write_audit(db, principal, f"ad.computer.{action}", name)
-    return result
-
 @router.post("/computers/{name}/move")
 async def move_computer(name: str, body: MoveBody, principal: Principal = Depends(require("computer.write")), db: Session = Depends(get_db)):
     result = await worker.request("POST", f"/ad/computers/{name}/move", payload=body.model_dump())
     write_audit(db, principal, "ad.computer.move", name, details=body.model_dump())
+    return result
+
+@router.post("/computers/{name}/{action}")
+async def computer_action(name: str, action: Literal["enable","disable","reset"], principal: Principal = Depends(require("computer.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", f"/ad/computers/{name}/{action}")
+    write_audit(db, principal, f"ad.computer.{action}", name)
     return result
 
 @router.delete("/computers/{name}")

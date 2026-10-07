@@ -2,6 +2,10 @@
 
 RSAT Full is a web-native administration center for the common Active Directory administration stack. It does not ship or emulate Microsoft MMC binaries.
 
+## Connection modes
+
+The inventories below describe Windows worker coverage. Direct Mac/Linux mode supports directory reads and common LDAP writes, DNS record inventory/create/edit/delete for eight types, and IPv4 DHCP scope and reservation management. It does not provide user creation, protected OU creation, replication health, recycle-bin restore, full GPO management, DNS zone management or DHCP utilization/options/failover. See [the detailed direct-mode coverage](direct-mac.md). SSH terminals and the native macOS app are independent of the Windows worker.
+
 ## Active Directory
 
 Implemented:

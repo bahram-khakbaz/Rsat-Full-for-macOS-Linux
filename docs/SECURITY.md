@@ -9,7 +9,9 @@ There are two separate identities:
 1. **Web operator identity** — the person using the RSAT Full UI.
 2. **Windows Worker identity** — the Windows domain account that executes Microsoft RSAT commands.
 
-The macOS/Linux control plane does not store the operator's Active Directory password.
+Worker mode uses the Windows account token. Direct mode stores the configured domain password encrypted with Fernet in PostgreSQL; saved passwords are never returned to the frontend or audit log. JWT_SECRET derives the encryption key: keep it stable, protect `.env` and database backups, and do not rotate it without a credential migration. SSH credentials use the same encrypted store.
+
+Direct LDAPS validates a trusted CA or an explicitly approved certificate pin, hostname and validity period before binding. DNS/DHCP RPC requires Kerberos and packet privacy. Tickets use private, short-lived temporary caches removed after requests. SSH verifies the approved server host key before password authentication, uses single-use session tickets and does not log terminal text.
 
 For production, the Windows Worker should run under a delegated service account or gMSA with the minimum required AD/DNS/DHCP/GPO permissions.
 

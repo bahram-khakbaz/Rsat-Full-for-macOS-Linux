@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import init_db
-from .routers import auth, ad, network, gpo, audit, domain, settings as settings_router
+from .routers import ssh, network_settings, auth, ad, network, gpo, audit, domain, settings as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,6 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(ssh.router)
+app.include_router(network_settings.router)
 app.include_router(auth.router)
 app.include_router(domain.router)
 app.include_router(ad.router)
@@ -30,4 +32,4 @@ app.include_router(settings_router.router)
 def health():
     from .runtime_config import get_runtime_config
     runtime = get_runtime_config()
-    return {"status":"ok","service":"backend","demo_mode":runtime.demo_mode,"version":"0.3.0"}
+    return {"status":"ok","service":"backend","demo_mode":runtime.demo_mode,"version":"0.4.0","connection_mode":runtime.connection_mode}

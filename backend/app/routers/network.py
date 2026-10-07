@@ -12,14 +12,18 @@ router = APIRouter(prefix="/api", tags=["network"])
 class DnsRecordBody(BaseModel):
     zone: str
     name: str
-    type: Literal["A","AAAA","CNAME","PTR"]
+    type: Literal["A","AAAA","CNAME","PTR","NS","MX","SRV","TXT"]
     value: str
     ttl: int = Field(default=3600, ge=60, le=86400)
+
+class DnsUpdateBody(DnsRecordBody):
+    old_value: str
+    old_ttl: int = Field(default=3600, ge=0, le=2147483647)
 
 class DnsDeleteBody(BaseModel):
     zone: str
     name: str
-    type: Literal["A","AAAA","CNAME","PTR"]
+    type: Literal["A","AAAA","CNAME","PTR","NS","MX","SRV","TXT"]
     value: str = ""
 
 class ZoneCreate(BaseModel):
@@ -81,6 +85,12 @@ async def dns_records(zone: str = Query(default=""), _: Principal = Depends(requ
 async def dns_create(body: DnsRecordBody, principal: Principal = Depends(require("dns.write")), db: Session = Depends(get_db)):
     result = await worker.request("POST", "/dns/records", payload=body.model_dump())
     write_audit(db, principal, "dns.record.create", f"{body.name}.{body.zone}", details=body.model_dump())
+    return result
+
+@router.post("/dns/records/update")
+async def dns_update(body: DnsUpdateBody, principal: Principal = Depends(require("dns.write")), db: Session = Depends(get_db)):
+    result = await worker.request("POST", "/dns/records/update", payload=body.model_dump())
+    write_audit(db, principal, "dns.record.update", body.name, details=body.model_dump())
     return result
 
 @router.post("/dns/records/delete")

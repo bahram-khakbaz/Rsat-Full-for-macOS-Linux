@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")/.."
 
 if ! command -v docker >/dev/null 2>&1; then

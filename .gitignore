@@ -14,3 +14,8 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Local native app output and Swift caches
+*.app/
+.macos-build/
+module-cache/

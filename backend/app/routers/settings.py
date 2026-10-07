@@ -1,4 +1,8 @@
 import json
+import re
+import ssl
+from typing import Literal
+from starlette.concurrency import run_in_threadpool
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -9,6 +13,7 @@ from ..config import settings
 from ..db import DomainControllerConfig, SiteConfig, SystemSetting, get_db
 from ..runtime_config import get_runtime_config
 from ..secret_store import encrypt_secret
+from ..native_ad import public_configuration
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -27,6 +32,7 @@ class SiteBody(BaseModel):
 
 class SettingsBody(BaseModel):
     demo_mode: bool = True
+    connection_mode: Literal["worker", "native"] | None = None
     worker_url: str = Field(default="", max_length=500)
     sites: list[SiteBody] = Field(default_factory=list)
 
@@ -93,7 +99,9 @@ def read_settings(_: Principal = Depends(require("settings.read")), db: Session 
         "worker_url": rows.get("worker_url", settings.worker_url),
         "worker_paired": bool(rows.get("worker_token") or settings.worker_token),
         "worker_identity": _worker_identity(rows),
-        "authentication_model": "domain-integrated-worker",
+        "authentication_model": "direct-ldaps" if runtime.connection_mode == "native" else "domain-integrated-worker",
+        "connection_mode": runtime.connection_mode,
+        "native": public_configuration(rows),
         "sites": sites,
     }
 
@@ -134,6 +142,8 @@ def save_settings(
 
     _upsert(db, "demo_mode", "true" if body.demo_mode else "false")
     _upsert(db, "worker_url", next_url)
+    if body.connection_mode is not None:
+        _upsert(db, "connection_mode", body.connection_mode)
 
     db.query(DomainControllerConfig).delete()
     db.query(SiteConfig).delete()
@@ -265,6 +275,9 @@ async def discover_dcs(
     _: Principal = Depends(require("settings.write")),
 ):
     runtime = get_runtime_config()
+    if runtime.connection_mode == "native" and not body.demo_mode:
+        from ..native_ad import request
+        return await run_in_threadpool(request, "GET", "/admin/discover-dcs")
     if body.demo_mode:
         from .. import demo
         return [{
@@ -300,6 +313,14 @@ async def test_dc(
     _: Principal = Depends(require("settings.write")),
 ):
     runtime = get_runtime_config()
+    if runtime.connection_mode == "native" and not body.demo_mode:
+        from ..native_ad import configuration, request
+        cfg = configuration()
+        if body.host not in cfg["hosts"]:
+            raise HTTPException(422, "Save this DC in settings before testing it")
+        cfg["hosts"] = [body.host]
+        result = await run_in_threadpool(request, "GET", "/admin/ping", None, None, cfg)
+        return {**result, "dns": True, "ldap": True, "ldaps": True}
     if body.demo_mode:
         return {
             "ok": True,
@@ -331,3 +352,102 @@ async def test_dc(
         raise
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"DC test failed: {exc}") from exc
+
+
+class NativeBody(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+    username: str = Field(min_length=3, max_length=256)
+    preferred_dc: str = Field(default="", max_length=253)
+    password: str | None = Field(default=None, max_length=1024)
+    ca_pem: str = Field(default="", max_length=65536)
+
+
+def validate_native(body: NativeBody):
+    domain = body.domain.strip().lower()
+    host = body.preferred_dc.strip().lower()
+    hostname = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    if not hostname.fullmatch(domain) or (host and (not hostname.fullmatch(host) or not host.endswith("." + domain))):
+        raise HTTPException(422, "Use the AD domain and a DC FQDN inside that domain")
+    username = body.username.strip()
+    if "@" not in username or "\\" in username or any(ord(x) < 32 for x in username):
+        raise HTTPException(422, "Enter your AD user principal name, for example operator@example.com")
+    if body.ca_pem.strip():
+        try:
+            ssl.create_default_context(cadata=body.ca_pem.strip())
+        except (ssl.SSLError, ValueError) as exc:
+            raise HTTPException(422, "The AD CA certificate must be a valid PEM certificate or certificate chain") from exc
+    return {"domain": domain, "username": username, "preferred_dc": host, "ca_pem": body.ca_pem.strip()}
+
+@router.put("/native")
+def save_native(body: NativeBody, principal: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):
+    cfg = validate_native(body)
+    rows = _settings_rows(db)
+    previous = json.loads(rows.get("native_config", "{}"))
+    identity_changed = any(previous.get(k) != cfg[k] for k in ("domain", "username"))
+    if not body.password and (identity_changed or not rows.get("native_password")):
+        raise HTTPException(422, "Enter the AD password for this account")
+    if body.password:
+        _upsert(db, "native_password", encrypt_secret(body.password))
+    _upsert(db, "native_config", json.dumps(cfg))
+    _upsert(db, "connection_mode", "native")
+    _upsert(db, "demo_mode", "false")
+    db.commit()
+    from ..native_ad import reset_auth_failure
+    reset_auth_failure()
+    write_audit(db, principal, "settings.native.save", cfg["domain"], details={"username":cfg["username"],"preferred_dc":cfg["preferred_dc"]})
+    return {"ok": True, "connection_mode": "native"}
+
+@router.post("/native/test")
+async def test_native(_: Principal = Depends(require("settings.write"))):
+    from ..native_ad import request
+    return await run_in_threadpool(request, "GET", "/admin/ping")
+
+@router.delete("/native/credentials")
+def forget_native(principal: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):
+    _delete_setting(db, "native_password")
+    db.commit()
+    write_audit(db, principal, "settings.native.forget", "native-account")
+    return {"ok": True}
+
+
+class CertificateProbe(BaseModel):
+    host: str = Field(min_length=3, max_length=253)
+
+class CertificateTrust(CertificateProbe):
+    fingerprint: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+
+
+def allowed_certificate_host(db: Session, host: str):
+    host = host.strip().lower()
+    cfg = json.loads(_settings_rows(db).get("native_config", "{}"))
+    hosts = [x.host.lower() for x in db.query(DomainControllerConfig).filter_by(enabled=True).all()]
+    if cfg.get("preferred_dc"):
+        hosts.append(cfg["preferred_dc"].lower())
+    if host not in hosts:
+        raise HTTPException(422, "Choose an enabled, saved domain controller")
+    return host
+
+@router.post("/native/certificate")
+async def inspect_native_certificate(body: CertificateProbe, _: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):
+    from ..native_ad import inspect_certificate
+    return await run_in_threadpool(inspect_certificate, allowed_certificate_host(db,body.host))
+
+@router.post("/native/trust-certificate")
+async def trust_native_certificate(body: CertificateTrust, principal: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):
+    from ..native_ad import inspect_certificate
+    host = allowed_certificate_host(db,body.host)
+    info = await run_in_threadpool(inspect_certificate,host)
+    if info["fingerprint"] != body.fingerprint.lower():
+        raise HTTPException(409, "The certificate changed since inspection. Inspect it again before approving.")
+    if not info["hostname_valid"] or not info["time_valid"]:
+        raise HTTPException(422, "Certificate is expired/not yet valid, or its DNS names do not match this DC")
+    pins = json.loads(_settings_rows(db).get("native_certificate_pins", "{}"))
+    pins[host] = info["fingerprint"]
+    _upsert(db,"native_certificate_pins",json.dumps(pins))
+    # Prefer the approved DC. One DC provides the whole domain's directory.
+    cfg = json.loads(_settings_rows(db).get("native_config", "{}"))
+    cfg["preferred_dc"] = host
+    _upsert(db,"native_config",json.dumps(cfg))
+    db.commit()
+    write_audit(db,principal,"settings.native.trust_certificate",host,details={"fingerprint":info["fingerprint"]})
+    return {"ok":True,"host":host,"fingerprint":info["fingerprint"]}

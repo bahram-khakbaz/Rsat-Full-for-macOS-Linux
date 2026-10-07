@@ -46,3 +46,10 @@ services:
 
 volumes:
   rsat_db:
+
+# Avoid overlaps with corporate AD networks in 172.16.0.0/12.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${RSAT_DOCKER_SUBNET:-192.168.247.0/24}

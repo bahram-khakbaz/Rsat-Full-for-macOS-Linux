@@ -1,41 +1,21 @@
 # Architecture
 
-RSAT Full Admin Center separates the cross-platform control plane from privileged Windows execution.
+The browser or native RSAT.app connects to Nginx on localhost and the FastAPI control plane. PostgreSQL holds encrypted settings, switch inventory and audit events. The API applies JWT authentication and role permissions to both connection modes.
 
-```text
-macOS / Linux browser
-        |
-        | HTTPS
-        v
-Web UI (React + Nginx)
-        |
-        v
-Control API (FastAPI)
-  |             |
-  |             +--> PostgreSQL audit log
-  |
-  +--> trusted private network / TLS
-             |
-             v
-      Windows Admin Worker
-        domain joined
-             |
-   allow-listed PowerShell only
-             |
-   +---------+---------+---------+
-   |         |         |         |
-   AD      DNS       DHCP      GPO
-```
+## Direct Mac/Linux mode
 
-## Why a Windows worker exists
+- AD directory reads and common writes use LDAPS with CA validation or explicit certificate pinning before credentials are sent.
+- DNS zone/record inventory uses LDAP; record writes use Samba DNS RPC.
+- DHCP discovery uses LDAP and service operations use Impacket MS-DHCPM RPC.
+- Both RPC paths require Kerberos and packet privacy, with private temporary credential caches.
+- SSH switch terminals use verified host keys and single-use WebSocket tickets.
 
-macOS and Linux do not provide Microsoft's RSAT PowerShell modules. The web application therefore does not try to emulate them locally. A dedicated domain-joined Windows management host executes a strict set of known commands and returns structured JSON.
+See [direct mode](direct-mac.md) for implemented operations and limitations. Optional WinRM service access requires Kerberos and encrypted messages. No native connector provides a generic command execution API.
 
-## Trust boundaries
+## Optional Windows worker
 
-1. Browser to web: authenticated user session.
-2. Web to API: JWT bearer token and RBAC.
-3. API to worker: dedicated high-entropy worker token over a trusted private network or TLS reverse proxy.
-4. Worker to domain services: Windows integrated credentials or a delegated service identity.
+Microsoft RSAT PowerShell modules require Windows. A dedicated domain-joined management host executes allow-listed operations for worker mode, including additional Group Policy and directory features. Pairing exchanges a one-time code for an encrypted worker credential; the worker uses its Windows account token. It does not expose arbitrary PowerShell execution.
 
-The worker does **not** expose arbitrary PowerShell execution.
+## Native macOS launcher
+
+The AppKit/WebKit app runs a fixed startup helper off the UI thread, reuses the existing Colima profile and Compose project, checks health and opens the local panel. Its generated configuration records the local clone path; it embeds no passwords. Closing the app leaves services and persistent data intact.
