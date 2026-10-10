@@ -9,6 +9,7 @@ import {Terminal as XTerminal} from '@xterm/xterm'
 import {FitAddon} from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './styles.css'
+import {formatApiError} from './api-errors.mjs'
 
 const TOKEN='rsat_token'
 const enc=encodeURIComponent
@@ -37,7 +38,7 @@ async function api(path,init={}){
   }
   if(!res.ok){
     let message='Request failed'
-    try{const d=await res.json();message=typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d)}catch{message=await res.text()}
+    try{message=formatApiError(await res.json())}catch{message='Request failed (HTTP '+res.status+')'}
     throw new Error(message)
   }
   return res.status===204?null:res.json()
@@ -50,7 +51,7 @@ function Status({ok,children}){return <span className={'status '+(ok===true?'ok'
 function Field({field,value,onChange}){
   if(field.type==='select') return <label><span>{field.label}</span><select value={value??field.default??''} onChange={e=>onChange(e.target.value)}>{field.options.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
   if(field.type==='checkbox') return <label className="check"><input type="checkbox" checked={Boolean(value)} onChange={e=>onChange(e.target.checked)}/><span>{field.label}</span></label>
-  return <label><span>{field.label}</span><input type={field.type||'text'} value={value??''} placeholder={field.placeholder||''} onChange={e=>onChange(e.target.value)} /></label>
+  return <label><span>{field.label}</span><input type={field.type||'text'} value={value??''} placeholder={field.placeholder||''} minLength={field.minLength} maxLength={field.maxLength} required={field.required||false} onChange={e=>onChange(e.target.value)} /></label>
 }
 function Modal({title,subtitle,fields=[],initial={},submitLabel='EXECUTE',danger=false,onClose,onSubmit,children}){
   const[values,setValues]=useState(()=>Object.fromEntries(fields.map(f=>[f.name,initial[f.name]??f.default??(f.type==='checkbox'?false:'')])))
@@ -265,7 +266,7 @@ function UsersPage({notify,native=false}){
     else load(targetPage,nextCursor,loadedQuery)
   }
   async function open(r){setSelected(r);try{const[d,g]=await Promise.all([api('/api/ad/users/'+enc(r.samAccountName)),api('/api/ad/users/'+enc(r.samAccountName)+'/groups')]);setDetail(d);setGroups(g)}catch(e){notify(e.message,'bad')}}
-  async function act(path,method='POST',body){try{await api(path,{method,body:body?JSON.stringify(body):undefined});notify('COMMAND COMPLETED','ok');await load();if(selected)await open(selected)}catch(e){notify(e.message,'bad')}}
+  async function act(path,method='POST',body,keepModal=false){try{await api(path,{method,body:body?JSON.stringify(body):undefined});notify('COMMAND COMPLETED','ok');await load();if(selected)await open(selected)}catch(e){if(keepModal)throw e;notify(e.message,'bad')}}
   useEffect(()=>{load()},[native])
   const createFields=[['sam_account_name','SAM ACCOUNT'],['given_name','GIVEN NAME'],['surname','SURNAME'],['display_name','DISPLAY NAME'],['email','EMAIL'],['department','DEPARTMENT'],['title','TITLE'],['company','COMPANY'],['manager','MANAGER (SAM/DN)'],['ou','TARGET OU DN'],['password','INITIAL PASSWORD','password']]
   const pageCount=Math.max(1,Math.ceil(rows.length/perPage)), visible=paged?rows:rows.slice((page-1)*perPage,page*perPage)
@@ -339,7 +340,7 @@ function UsersPage({notify,native=false}){
     </aside>
     {modal==='create'&&<Modal title="CREATE DIRECTORY USER" fields={createFields.map(x=>({name:x[0],label:x[1],type:x[2]})).concat([{name:'enabled',label:'ACCOUNT ENABLED',type:'checkbox',default:true},{name:'must_change',label:'CHANGE PASSWORD AT LOGON',type:'checkbox',default:true}])} onClose={()=>setModal(null)} onSubmit={async v=>{await api('/api/ad/users',{method:'POST',body:JSON.stringify(v)});notify('USER CREATED','ok');load()}}/>}
     {modal==='edit'&&detail&&<Modal title={'EDIT '+detail.samAccountName} initial={{display_name:detail.displayName,email:detail.mail,department:detail.department,title:detail.title,company:detail.company,manager:detail.manager,mobile:detail.mobile}} fields={[{name:'display_name',label:'DISPLAY NAME'},{name:'email',label:'EMAIL'},{name:'department',label:'DEPARTMENT'},{name:'title',label:'TITLE'},{name:'company',label:'COMPANY'},{name:'manager',label:'MANAGER'},{name:'mobile',label:'MOBILE'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName),'PATCH',v)}/>}
-    {modal==='password'&&detail&&<Modal title={'RESET PASSWORD / '+detail.samAccountName} fields={[{name:'new_password',label:'NEW PASSWORD',type:'password'},{name:'must_change',label:'CHANGE AT NEXT LOGON',type:'checkbox',default:true}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/reset-password','POST',v)}/>}
+    {modal==='password'&&detail&&<Modal title={'RESET PASSWORD / '+detail.samAccountName} fields={[{name:'new_password',label:'NEW PASSWORD (8–256 CHARACTERS)',type:'password',minLength:8,maxLength:256,required:true},{name:'must_change',label:'CHANGE AT NEXT LOGON',type:'checkbox',default:true}]} onClose={()=>setModal(null)} subtitle='Domain complexity and password history rules also apply.' onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/reset-password','POST',v,true)}/>}
     {modal==='move'&&detail&&<Modal title={'MOVE USER / '+detail.samAccountName} fields={[{name:'target_ou',label:'TARGET OU DISTINGUISHED NAME'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/move','POST',v)}/>}
     {modal==='delete'&&detail&&<Modal title={'DELETE '+detail.samAccountName+' ?'} subtitle="This removes the Active Directory object. Use the Recycle Bin if recovery is required." fields={[]} danger submitLabel="DELETE OBJECT" onClose={()=>setModal(null)} onSubmit={()=>act('/api/ad/users/'+enc(detail.samAccountName),'DELETE')}/>}
   </div>
