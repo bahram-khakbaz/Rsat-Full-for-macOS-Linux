@@ -2,7 +2,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 class PasswordBody(BaseModel):
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
     must_change: bool = True
 
 class UserCreate(BaseModel):
@@ -16,7 +16,7 @@ class UserCreate(BaseModel):
     company: str = ""
     manager: str = ""
     ou: str
-    password: str = Field(min_length=12, max_length=256)
+    password: str = Field(min_length=8, max_length=256)
     enabled: bool = True
     must_change: bool = True
 
