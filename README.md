@@ -59,6 +59,9 @@ Direct mode needs reachable company DNS/network, trusted LDAPS certificates and 
 - Zone deletion
 - Direct record inventory and create/edit/delete: A, AAAA, CNAME, PTR, NS, MX, SRV and TXT
 - SOA and unknown record types are read-only
+- Browse zones and nested DNS subdomains using folders, a zone tree and breadcrumbs
+- New record names are relative to the open folder (`@` targets that folder); edits/deletes retain the original owner name
+- Search the open folder and its subfolders, or return to the zone root to search the entire zone
 - Zone create/delete requires the Windows worker or optional WinRM connector
 
 ### DHCP
@@ -267,7 +270,7 @@ PYTHONPATH=backend pytest -q backend/tests
 python3 macos/tests/test_launcher.py
 cd frontend
 npm ci --no-audit --no-fund
-node --test src/api-errors.test.mjs src/file-transfer.test.mjs
+node --test src/api-errors.test.mjs src/file-transfer.test.mjs src/dns-browser.test.mjs
 npm run build
 ```
 

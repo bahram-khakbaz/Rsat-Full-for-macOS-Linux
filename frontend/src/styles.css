@@ -405,6 +405,25 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .dns-page .panel-title{align-items:start;flex-wrap:wrap}
 .dns-page .panel-actions{flex-wrap:wrap}
 .dns-page .inspector .kv{display:grid;grid-template-columns:1fr 1fr}
+.dns-browser{display:grid;grid-template-columns:230px minmax(0,1fr);min-width:0}
+.dns-zone-tree{border-right:1px solid var(--line);max-height:60vh;overflow:auto;background:#031819;padding-bottom:8px}
+.dns-tree-caption{padding:12px;font-size:10px;color:var(--cyan);border-bottom:1px solid var(--line-soft)}
+.dns-zone-tree button{display:flex;align-items:center;gap:7px;width:100%;border:0;border-bottom:1px solid #173536;background:transparent;color:var(--text);padding:9px 10px;text-align:left;font-size:10px;line-height:1.5}
+.dns-zone-tree button:hover,.dns-zone-tree button.active{background:#143334;color:var(--cyan)}
+.dns-zone-tree button span{min-width:0;overflow-wrap:anywhere}
+.dns-zone-tree svg{flex-shrink:0}
+.dns-zone-tree .expanded{transform:rotate(90deg)}
+.dns-folder-content{min-width:0}
+.dns-breadcrumbs{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:10px;border-bottom:1px solid var(--line-soft)}
+.dns-breadcrumbs>button:not(.btn){padding:5px;border:0;background:transparent;color:var(--cyan);font-size:11px;overflow-wrap:anywhere;max-width:100%;text-align:left}
+.dns-folder-caption{padding:10px;color:var(--muted);font-size:10px;overflow-wrap:anywhere;line-height:1.6}
+.dns-folders{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px;padding:0 10px 10px;max-height:220px;overflow:auto}
+.dns-folders button{border:1px solid var(--line-soft);background:#061a1b;color:var(--text);display:grid;grid-template-columns:24px minmax(0,1fr) 14px;gap:5px;padding:10px;align-items:center;text-align:left}
+.dns-folders button:hover{border-color:var(--cyan);background:#143334}
+.dns-folders button span{overflow-wrap:anywhere;font-size:11px}
+.dns-folders button small{grid-column:2;font-size:9px;color:var(--muted)}
+.dns-folders button>svg:last-child{grid-column:3;grid-row:1/3}
+@media(max-width:1100px){.dns-browser{grid-template-columns:1fr}.dns-zone-tree{max-height:210px;border-right:0;border-bottom:1px solid var(--line)}}
 
 .ssh-login-status{display:block;margin-bottom:8px;font-size:10px;color:#d4e0e0}
 
