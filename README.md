@@ -10,6 +10,22 @@ The control plane and UI run on macOS/Linux. Direct mode connects to Active Dire
 
 The UI uses a self-contained retro systems-console design: dense information, monospace typography, hard borders, explicit state indicators, and keyboard-friendly administration flows. No CDN or external font is required.
 
+Module buttons keep their full labels and wrap into additional rows when the window narrows. File Transfer uses aligned local/remote panels, wrapping action bars, dark input controls and bounded tables. At smaller widths the file browsers stack vertically; long file names wrap within their cells. Scroll the central workspace to reach the queue and lower actions in a short window. The desktop layout supports windows at least 800 × 680 pixels; it is not a mobile interface.
+
+Quick links: [macOS app](docs/MACOS_DEPLOYMENT.md) · [Direct AD/DNS/DHCP](docs/direct-mac.md) · [Windows worker](docs/WINDOWS_WORKER.md) · [SFTP guide](docs/FILE_TRANSFER.md) · [Coverage](docs/COVERAGE.md).
+
+## Choose a connection mode
+
+| Area | Direct Mac/Linux | Optional Windows worker |
+| --- | --- | --- |
+| AD | Directory reads and common LDAP writes; see limitations below | Broader RSAT operations, including user creation and recycle-bin restore |
+| DNS | Zone/record inventory; create, edit and delete eight record types | Zone management and worker record operations |
+| DHCP | IPv4 scopes, leases and reservations; scope/reservation changes | IPv4 management and statistics |
+| Group Policy | Inventory | Management, links, reports, backups and permissions |
+| SSH / Linux / SFTP | Independent SSH connection from the backend | No worker needed |
+
+Direct mode needs reachable company DNS/network, trusted LDAPS certificates and the appropriate delegated AD/service rights. It does not implement user creation, protected OU creation, computer-account reset, replication health, recycle-bin restore or full GPO management. DHCP options, exclusions, DHCPv6 and failover management are also not implemented. A successful connection check does not grant write permissions; each destination enforces the account's actual rights.
+
 ## Implemented management areas
 
 ### Active Directory / ADAC / ADUC
@@ -44,8 +60,6 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 - Direct record inventory and create/edit/delete: A, AAAA, CNAME, PTR, NS, MX, SRV and TXT
 - SOA and unknown record types are read-only
 - Zone create/delete requires the Windows worker or optional WinRM connector
-- Record creation
-- Record deletion
 
 ### DHCP
 
@@ -134,7 +148,7 @@ the page/app. See [File Transfer](docs/FILE_TRANSFER.md) for details and limits.
 
 ## Architecture
 
-The browser or native macOS app connects to Nginx and FastAPI, with PostgreSQL holding configuration and audit data. Direct mode connects to AD over validated LDAPS, DNS through Samba RPC, DHCP through Impacket RPC, and switches over SSH. Optional worker mode uses the allow-listed Windows management API.
+The browser or native macOS app connects to Nginx and FastAPI, with PostgreSQL holding configuration and audit data. Direct mode connects to AD over validated LDAPS, DNS through Samba RPC, DHCP through Impacket RPC, and switches/Linux hosts over SSH or SFTP. Optional worker mode uses the allow-listed Windows management API.
 
 See [Direct Mac connection](docs/direct-mac.md) for supported operations and limitations. The lists above include worker capabilities; direct mode has a narrower scope.
 
@@ -219,6 +233,54 @@ macos/            Native app source, startup helper and isolated tests
 ```
 
 CI independently tests Python and builds the frontend on every push.
+
+For the individual checks used by CI:
+
+```bash
+pip install -r backend/requirements.txt
+PYTHONPATH=backend pytest -q backend/tests
+python3 macos/tests/test_launcher.py
+cd frontend
+npm ci --no-audit --no-fund
+node --test src/api-errors.test.mjs src/file-transfer.test.mjs
+npm run build
+```
+
+Backend RPC tests additionally require the system Kerberos and Samba dependencies used in the backend Dockerfile and CI workflow. Use Python 3.13 and Node.js 22 as in CI. If host dependencies were installed on another operating system, use a clean `npm ci` or build with `docker compose build web`; do not reuse Linux `node_modules` on macOS.
+
+UI acceptance uses disposable loopback SFTP fixtures, including upload and long file names, rather than production server writes. Automated mocks and local fixtures do not establish compatibility with every organization's AD, DHCP or SSH configuration.
+
+## Update an existing installation
+
+Back up the database and protect the existing `.env` first. Keep `JWT_SECRET` unchanged: saved encrypted credentials depend on it. From the same checkout and Compose project used for installation:
+
+```bash
+git pull --ff-only
+docker compose up -d --build --wait
+```
+
+Reload the panel after the build (⌘R in RSAT.app). UI-only changes do not require rebuilding the native launcher. If native macOS source changes, follow the app build/install instructions in [macOS deployment](docs/MACOS_DEPLOYMENT.md). Do not remove the database volume while updating.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Old controls or layout after an update | Confirm the web image was rebuilt and the web container recreated, then reload the panel. |
+| DC online but directory reads fail | Port reachability is not an authenticated LDAP read. Check direct credentials, LDAPS trust, DNS and the requested capability. |
+| DNS/DHCP connection works but a change fails | Verify delegated rights and the selected service host; preserve the displayed partial-failure details before retrying. |
+| SSH/SFTP cannot connect | Save the account/password, approve an independently verified host key, and check network access. SFTP additionally needs a server SFTP subsystem. |
+| File transfer denied | Check the remote account's read/write permissions and the panel role. A remote permission denial does not invalidate the panel login. |
+| Some operations are disabled | Check the connection-mode coverage and assigned panel role; unsupported direct-mode operations require the optional worker. |
+
+## Suggested next additions (not implemented)
+
+1. **SSH keys and SSH-agent authentication**, with per-host identity selection, to complement password authentication.
+2. **Resumable transfers and directory synchronization**, with previews, conflict handling and independent remote checksum verification.
+3. **Linux operations dashboard** for service status, resource usage and searchable logs, followed by explicitly authorized service actions.
+4. **Bulk AD/DNS changes with a dry-run preview**, CSV validation and an audit-linked change report before applying writes.
+5. **Backup/restore and access management**: verified configuration/database recovery, organizational SSO/MFA and more granular operator permissions.
+
+These are a roadmap, not current guarantees. Server actions and bulk changes should preserve the existing host-key checks, delegated rights and audit trail.
 
 ## License
 
