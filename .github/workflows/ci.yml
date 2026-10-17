@@ -29,6 +29,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --no-audit --no-fund
+      - run: node --test src/api-errors.test.mjs src/file-transfer.test.mjs
       - run: npm run build
 
   powershell:

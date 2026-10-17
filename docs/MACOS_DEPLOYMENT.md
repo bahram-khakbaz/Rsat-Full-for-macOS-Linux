@@ -17,6 +17,13 @@ open .macos-build
 
 Move the generated **RSAT.app** to Applications using Finder, open it, then choose **Options → Keep in Dock**. The builder embeds the local clone location into the generated app only. Rebuild the app if the repository moves. Generated apps, logs and local configuration are excluded from Git.
 
+Version 1.3.0 includes native file/folder selection and a download save dialog for
+the integrated SFTP client, plus standard Edit shortcuts. A healthy local panel
+opens directly; the Docker/Colima startup helper is used when the health probe
+fails. Updating containers alone does not update an older native launcher:
+rebuild/reinstall RSAT.app to receive these native features. Existing database
+volumes, encrypted credentials and the Docker profile are reused.
+
 Opening RSAT starts the existing Colima profile when necessary, starts the same Compose project without removing data, checks service health and loads the panel in a native window. Closing the window leaves the services running. After a Mac restart, open the app again. Startup errors offer Retry and a private log in `~/Library/Logs/RSAT/`. The app does not bypass panel login or start automatically at OS login. An expired session requires login again. Company network/VPN access is still needed for live management.
 
 ## Panel password

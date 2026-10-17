@@ -55,7 +55,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .connection-strip u{color:#7fd0ff;text-underline-offset:2px}
 
 .module-tabs{
-  display:grid;grid-template-columns:repeat(12,minmax(88px,1fr));
+  display:grid;grid-template-columns:repeat(14,minmax(88px,1fr));overflow-x:auto;
   gap:8px;padding:6px 8px;border:1px solid var(--line);
   background:#001112;
 }
@@ -342,7 +342,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:1500px){
   .connection-config{grid-template-columns:190px minmax(220px,1fr) minmax(220px,1fr);align-items:end}
   .connection-buttons{grid-column:1/-1;justify-content:flex-start}
-  .module-tabs{grid-template-columns:repeat(12,minmax(75px,1fr))}
+  .module-tabs{grid-template-columns:repeat(14,minmax(75px,1fr))}
   .module-tabs button{font-size:8px;gap:4px}
 }
 
@@ -412,3 +412,20 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .ssh-page .table-shell{max-height:35vh;overflow:auto}
 .ssh-page .table-shell thead{position:sticky;top:0;z-index:1}
+.file-connect{display:flex;gap:10px;align-items:end;padding:12px;flex-wrap:wrap}
+.file-connect label{flex:1;min-width:240px;display:grid;gap:5px}
+.file-connect select{min-height:32px;width:100%}
+.file-panes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
+.file-panes>div{min-width:0}
+.file-transfer-page .table-shell{max-height:42vh;overflow:auto}
+.file-transfer-page .table-shell thead{position:sticky;top:0;z-index:1}
+.file-transfer-page .inline-tools{flex-wrap:wrap;gap:7px;padding:10px}
+.file-path{display:flex;gap:6px;padding:9px;align-items:center;border-bottom:1px solid var(--line);min-height:45px}
+.file-path input{flex:1;min-width:80px}
+.file-path code{overflow-wrap:anywhere;font-size:10px}
+.file-name{border:0;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;overflow-wrap:anywhere}
+.file-name:hover{text-decoration:underline;color:var(--accent)}
+.file-queue-message{display:block;white-space:normal;max-width:420px;line-height:1.6;margin-top:5px}
+.file-transfer-page progress{display:block;width:140px;height:8px;accent-color:#65d9b1}
+.file-editor{grid-column:1/-1;width:100%;min-height:45vh;resize:vertical;font:12px/1.6 Menlo,monospace;tab-size:2;white-space:pre;direction:ltr}
+@media(max-width:1150px){.file-panes{grid-template-columns:1fr}.file-transfer-page .table-shell{max-height:35vh}}

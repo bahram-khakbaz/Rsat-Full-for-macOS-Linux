@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 import Foundation
 
-class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     var window: NSWindow!
     let status = NSTextField(labelWithString: "Starting Docker and RSAT…")
     let spinner = NSProgressIndicator()
@@ -12,6 +12,7 @@ class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var running = false
     var process: Process?
     var config: [String:String] = [:]
+    var downloads: [ObjectIdentifier:(temporary:URL,destination:URL)] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let path = Bundle.main.url(forResource: "launcher", withExtension: "json"),
@@ -52,6 +53,18 @@ class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         running = true; retry.isHidden = true; logs.isHidden = true
         status.stringValue = "Starting Docker and RSAT… This may take a minute after restarting your Mac."
         spinner.startAnimation(nil)
+        // An already-healthy installation needs no second Docker startup.
+        var request = URLRequest(url:URL(string:"http://localhost:8080/api/health")!)
+        request.timeoutInterval = 3
+        URLSession.shared.dataTask(with:request) { data,response,_ in
+            let info = data.flatMap { try? JSONSerialization.jsonObject(with:$0) as? [String:Any] }
+            if (response as? HTTPURLResponse)?.statusCode == 200, info?["status"] as? String == "ok" {
+                DispatchQueue.main.async { self.running = false; self.showPanel() }
+            } else { DispatchQueue.main.async { self.startServices() } }
+        }.resume()
+    }
+
+    func startServices() {
         guard let script = Bundle.main.path(forResource: "start-rsat", ofType: "sh"),
               let repo = config["repository"], let log = config["log"] else { fail("Launcher configuration is missing."); return }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -86,6 +99,7 @@ class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     @objc func openLog() {
         if let path = config["log"] { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
     }
+    @objc func reloadPanel() { web?.reload() }
     func showPanel() {
         spinner.stopAnimation(nil)
         status.isHidden = true; retry.isHidden = true; logs.isHidden = true
@@ -94,6 +108,7 @@ class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         let browser = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
         browser.autoresizingMask = [.width,.height]
         browser.navigationDelegate = self
+        browser.uiDelegate = self
         window.contentView!.addSubview(browser); web = browser
         browser.load(URLRequest(url: URL(string: "http://localhost:8080/#users")!))
     }
@@ -101,11 +116,70 @@ class Launcher: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         webView.removeFromSuperview(); web = nil; status.isHidden = false
         fail("The local panel could not load. Retry to check its services.")
     }
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        guard ["localhost","127.0.0.1"].contains(frame.securityOrigin.host), frame.securityOrigin.port == 8080 else { completionHandler(nil); return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = !parameters.allowsDirectories
+        panel.beginSheetModal(for:window) { result in completionHandler(result == .OK ? panel.urls : nil) }
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = (suggestedFilename as NSString).lastPathComponent
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for:window) { result in
+            guard result == .OK, let target = panel.url else { completionHandler(nil); return }
+            let temporary = target.deletingLastPathComponent().appendingPathComponent(".rsat-download-" + UUID().uuidString + ".part")
+            self.downloads[ObjectIdentifier(download)] = (temporary,target)
+            completionHandler(temporary)
+        }
+    }
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let item = downloads.removeValue(forKey:ObjectIdentifier(download)) else { return }
+        do {
+            if FileManager.default.fileExists(atPath:item.destination.path) {
+                _ = try FileManager.default.replaceItemAt(item.destination, withItemAt:item.temporary)
+            } else { try FileManager.default.moveItem(at:item.temporary,to:item.destination) }
+        } catch {
+            let alert = NSAlert(); alert.messageText = "Could not save the downloaded file"
+            alert.informativeText = "The received data remains in a .rsat-download temporary file beside the selected destination. Check folder permissions and available disk space."
+            alert.beginSheetModal(for:window)
+        }
+    }
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        if let item = downloads.removeValue(forKey:ObjectIdentifier(download)) { try? FileManager.default.removeItem(at:item.temporary) }
+        if (error as NSError).code != NSURLErrorCancelled {
+            let alert = NSAlert(); alert.messageText = "Download did not complete"
+            alert.informativeText = "The destination was not replaced. Retry the transfer after checking the connection."
+            alert.beginSheetModal(for:window)
+        }
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationWillTerminate(_ notification: Notification) { process?.terminate() }
 }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 let delegate = Launcher()
+let mainMenu = NSMenu(), appItem = NSMenuItem(), appMenu = NSMenu()
+mainMenu.addItem(appItem); appItem.submenu = appMenu
+appMenu.addItem(withTitle:"Reload Panel",action:#selector(Launcher.reloadPanel),keyEquivalent:"r").target = delegate
+appMenu.addItem(withTitle:"Quit RSAT",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+let editItem = NSMenuItem(title:"Edit",action:nil,keyEquivalent:""), editMenu = NSMenu(title:"Edit")
+for (title,action,key) in [("Cut",#selector(NSText.cut(_:)),"x"),("Copy",#selector(NSText.copy(_:)),"c"),("Paste",#selector(NSText.paste(_:)),"v"),("Select All",#selector(NSText.selectAll(_:)),"a")] { editMenu.addItem(withTitle:title,action:action,keyEquivalent:key) }
+editItem.submenu = editMenu; mainMenu.addItem(editItem); app.mainMenu = mainMenu
 app.delegate = delegate
 app.run()

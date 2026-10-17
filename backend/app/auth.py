@@ -14,7 +14,7 @@ ROLE_PERMISSIONS = {
         "domain.read", "ad.read", "ad.create", "ad.update", "ad.unlock", "ad.password",
         "ad.enable_disable", "group.read", "group.membership", "computer.read", "ou.read", "audit.read"
     },
-    "network": {"ssh.read", "ssh.write", "ssh.connect", "domain.read", "dns.read", "dns.write", "dhcp.read", "dhcp.write", "audit.read"},
+    "network": {"ssh.read", "ssh.write", "ssh.connect", "sftp.read", "sftp.write", "domain.read", "dns.read", "dns.write", "dhcp.read", "dhcp.write", "audit.read"},
     "gpo_admin": {"domain.read", "ad.read", "ou.read", "gpo.read", "gpo.write", "audit.read"},
     "auditor": {
         "domain.read", "ad.read", "group.read", "computer.read", "ou.read",

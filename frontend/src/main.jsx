@@ -9,6 +9,8 @@ import {Terminal as XTerminal} from '@xterm/xterm'
 import {FitAddon} from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './styles.css'
+import {formatApiError} from './api-errors.mjs'
+import FileTransferPage from './FileTransfer.jsx'
 
 const TOKEN='rsat_token'
 const enc=encodeURIComponent
@@ -24,6 +26,8 @@ const nav=[
   ['gpo','9','Group Policy',ShieldCheck],
   ['audit','0','Audit Log',FileClock],
   ['ssh','H','SSH Switches',Terminal],
+  ['linux','L','Linux Servers',Server],
+  ['files','F','File Transfer',Folder],
   ['settings','S','Settings',SlidersHorizontal],
 ]
 
@@ -37,7 +41,7 @@ async function api(path,init={}){
   }
   if(!res.ok){
     let message='Request failed'
-    try{const d=await res.json();message=typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d)}catch{message=await res.text()}
+    try{message=formatApiError(await res.json())}catch{message='Request failed (HTTP '+res.status+')'}
     throw new Error(message)
   }
   return res.status===204?null:res.json()
@@ -50,7 +54,7 @@ function Status({ok,children}){return <span className={'status '+(ok===true?'ok'
 function Field({field,value,onChange}){
   if(field.type==='select') return <label><span>{field.label}</span><select value={value??field.default??''} onChange={e=>onChange(e.target.value)}>{field.options.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
   if(field.type==='checkbox') return <label className="check"><input type="checkbox" checked={Boolean(value)} onChange={e=>onChange(e.target.checked)}/><span>{field.label}</span></label>
-  return <label><span>{field.label}</span><input type={field.type||'text'} value={value??''} placeholder={field.placeholder||''} onChange={e=>onChange(e.target.value)} /></label>
+  return <label><span>{field.label}</span><input type={field.type||'text'} value={value??''} placeholder={field.placeholder||''} minLength={field.minLength} maxLength={field.maxLength} required={field.required||false} onChange={e=>onChange(e.target.value)} /></label>
 }
 function Modal({title,subtitle,fields=[],initial={},submitLabel='EXECUTE',danger=false,onClose,onSubmit,children}){
   const[values,setValues]=useState(()=>Object.fromEntries(fields.map(f=>[f.name,initial[f.name]??f.default??(f.type==='checkbox'?false:'')])))
@@ -265,7 +269,7 @@ function UsersPage({notify,native=false}){
     else load(targetPage,nextCursor,loadedQuery)
   }
   async function open(r){setSelected(r);try{const[d,g]=await Promise.all([api('/api/ad/users/'+enc(r.samAccountName)),api('/api/ad/users/'+enc(r.samAccountName)+'/groups')]);setDetail(d);setGroups(g)}catch(e){notify(e.message,'bad')}}
-  async function act(path,method='POST',body){try{await api(path,{method,body:body?JSON.stringify(body):undefined});notify('COMMAND COMPLETED','ok');await load();if(selected)await open(selected)}catch(e){notify(e.message,'bad')}}
+  async function act(path,method='POST',body,keepModal=false){try{await api(path,{method,body:body?JSON.stringify(body):undefined});notify('COMMAND COMPLETED','ok');await load();if(selected)await open(selected)}catch(e){if(keepModal)throw e;notify(e.message,'bad')}}
   useEffect(()=>{load()},[native])
   const createFields=[['sam_account_name','SAM ACCOUNT'],['given_name','GIVEN NAME'],['surname','SURNAME'],['display_name','DISPLAY NAME'],['email','EMAIL'],['department','DEPARTMENT'],['title','TITLE'],['company','COMPANY'],['manager','MANAGER (SAM/DN)'],['ou','TARGET OU DN'],['password','INITIAL PASSWORD','password']]
   const pageCount=Math.max(1,Math.ceil(rows.length/perPage)), visible=paged?rows:rows.slice((page-1)*perPage,page*perPage)
@@ -339,7 +343,7 @@ function UsersPage({notify,native=false}){
     </aside>
     {modal==='create'&&<Modal title="CREATE DIRECTORY USER" fields={createFields.map(x=>({name:x[0],label:x[1],type:x[2]})).concat([{name:'enabled',label:'ACCOUNT ENABLED',type:'checkbox',default:true},{name:'must_change',label:'CHANGE PASSWORD AT LOGON',type:'checkbox',default:true}])} onClose={()=>setModal(null)} onSubmit={async v=>{await api('/api/ad/users',{method:'POST',body:JSON.stringify(v)});notify('USER CREATED','ok');load()}}/>}
     {modal==='edit'&&detail&&<Modal title={'EDIT '+detail.samAccountName} initial={{display_name:detail.displayName,email:detail.mail,department:detail.department,title:detail.title,company:detail.company,manager:detail.manager,mobile:detail.mobile}} fields={[{name:'display_name',label:'DISPLAY NAME'},{name:'email',label:'EMAIL'},{name:'department',label:'DEPARTMENT'},{name:'title',label:'TITLE'},{name:'company',label:'COMPANY'},{name:'manager',label:'MANAGER'},{name:'mobile',label:'MOBILE'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName),'PATCH',v)}/>}
-    {modal==='password'&&detail&&<Modal title={'RESET PASSWORD / '+detail.samAccountName} fields={[{name:'new_password',label:'NEW PASSWORD',type:'password'},{name:'must_change',label:'CHANGE AT NEXT LOGON',type:'checkbox',default:true}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/reset-password','POST',v)}/>}
+    {modal==='password'&&detail&&<Modal title={'RESET PASSWORD / '+detail.samAccountName} fields={[{name:'new_password',label:'NEW PASSWORD (8–256 CHARACTERS)',type:'password',minLength:8,maxLength:256,required:true},{name:'must_change',label:'CHANGE AT NEXT LOGON',type:'checkbox',default:true}]} onClose={()=>setModal(null)} subtitle='Domain complexity and password history rules also apply.' onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/reset-password','POST',v,true)}/>}
     {modal==='move'&&detail&&<Modal title={'MOVE USER / '+detail.samAccountName} fields={[{name:'target_ou',label:'TARGET OU DISTINGUISHED NAME'}]} onClose={()=>setModal(null)} onSubmit={v=>act('/api/ad/users/'+enc(detail.samAccountName)+'/move','POST',v)}/>}
     {modal==='delete'&&detail&&<Modal title={'DELETE '+detail.samAccountName+' ?'} subtitle="This removes the Active Directory object. Use the Recycle Bin if recovery is required." fields={[]} danger submitLabel="DELETE OBJECT" onClose={()=>setModal(null)} onSubmit={()=>act('/api/ad/users/'+enc(detail.samAccountName),'DELETE')}/>}
   </div>
@@ -823,7 +827,7 @@ function ServiceConnection({notify,children}){
   return <div className="stack"><details className="service-details"><summary>SERVICE CONNECTION · {cfg?.dns_host} / {cfg?.dhcp_host} · SETTINGS</summary><Panel title="DIRECT DNS / DHCP SERVICE CONNECTION" code="NET"><div className="identity-model-note"><div><b>DIRECT MAC → SERVICE HOST / KERBEROS</b><span>Uses your saved domain account automatically. Direct DNS and DHCP use encrypted Kerberos RPC; the server enforces your existing permissions. Select an authorized DHCP server below. LDAP mode provides DNS inventory only. WinRM is optional.</span></div></div>{error&&<div className="error-box">{error}</div>}{cfg&&<form onSubmit={save} className="service-connection"><Field field={{label:'DNS SERVER FQDN'}} value={cfg.dns_host} onChange={v=>setCfg({...cfg,dns_host:v})}/><Field field={{label:'DHCP SERVER FQDN'}} value={cfg.dhcp_host} onChange={v=>setCfg({...cfg,dhcp_host:v})}/><Field field={{label:'DNS CONNECTION',type:'select',options:['Direct','LDAP','WinRM']}} value={cfg.dns_mode} onChange={v=>setCfg({...cfg,dns_mode:v})}/><Field field={{label:'DHCP CONNECTION',type:'select',options:['RPC','WinRM']}} value={cfg.dhcp_mode} onChange={v=>setCfg({...cfg,dhcp_mode:v})}/><Field field={{label:'WINRM PORT (WINRM MODE ONLY)',type:'number'}} value={cfg.port} onChange={v=>setCfg({...cfg,port:v})}/><Button type="submit" kind="primary" disabled={busy}>{busy?'SAVING...':'SAVE / RETRY'}</Button><small>ACCOUNT: {cfg.username} · {cfg.password_configured?'SAVED DOMAIN PASSWORD':'SAVE DOMAIN PASSWORD IN SETTINGS'}</small>{servers.length>0&&<label className="discovered-dhcp"><span>AUTHORIZED DHCP SERVERS DISCOVERED FROM AD</span><select value={servers.some(x=>x.host===cfg.dhcp_host)?cfg.dhcp_host:''} onChange={e=>setCfg({...cfg,dhcp_host:e.target.value})}><option value="">SELECT DHCP SERVER</option>{servers.map(x=><option key={x.host} value={x.host}>{x.host} / {x.ip}</option>)}</select></label>}</form>}</Panel></details>{cfg&&<div key={revision}>{React.cloneElement(children,{dnsReadOnly:cfg.dns_mode==='LDAP',dnsZoneReadOnly:cfg.dns_mode!=='WinRM',defaultZone:cfg.domain})}</div>}</div>
 }
 
-function SshTerminal({device,onClose}){
+function SshTerminal({device,onClose,baseUrl='/api/ssh/switches'}){
   const element=useRef(null),[status,setStatus]=useState('CONNECTING'),[error,setError]=useState('')
   useEffect(()=>{
     let active=true,socket=null,observer=null,keepalive=null
@@ -832,9 +836,9 @@ function SshTerminal({device,onClose}){
     const send=x=>{if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(x))}
     const input=term.onData(data=>send({type:'input',data}))
     const resize=term.onResize(({cols,rows})=>send({type:'resize',cols,rows}))
-    api('/api/ssh/switches/'+device.id+'/ticket',{method:'POST'}).then(({ticket})=>{
+    api(baseUrl+'/'+device.id+'/ticket',{method:'POST'}).then(({ticket})=>{
       if(!active)return
-      socket=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ssh/switches/'+device.id+'/terminal')
+      socket=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+baseUrl+'/'+device.id+'/terminal')
       socket.onopen=()=>send({ticket})
       socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='ready'){setStatus('CONNECTED');fit.fit();send({type:'resize',cols:term.cols,rows:term.rows});term.focus()}else if(m.type==='output'){term.write(Uint8Array.from(atob(m.data),c=>c.charCodeAt(0)))}else if(m.type==='error'){setError(m.message);setStatus('FAILED')}}
       socket.onclose=()=>{if(active)setStatus(x=>x==='FAILED'?x:'DISCONNECTED')}
@@ -843,21 +847,26 @@ function SshTerminal({device,onClose}){
       observer=new ResizeObserver(()=>fit.fit());observer.observe(element.current)
     }).catch(e=>{if(active){setStatus('FAILED');setError(e.message)}})
     return()=>{active=false;clearInterval(keepalive);send({type:'disconnect'});socket?.close();observer?.disconnect();input.dispose();resize.dispose();term.dispose()}
-  },[device.id])
-  return <Panel title={'SSH / '+device.name+' / '+device.host} code="PTY" actions={<><Status ok={status==='CONNECTED'}>{status}</Status><Button icon={LogOut} onClick={onClose}>DISCONNECT</Button></>}>{error&&<div className="error-box">{error}</div>}<div ref={element} className="ssh-terminal"/><div className="identity-model-note"><span>Interactive switch CLI. The saved account is used when you connect. Terminal content is not recorded in the audit log.</span></div></Panel>
+  },[device.id,baseUrl])
+  return <Panel title={'SSH / '+device.name+' / '+device.host} code="PTY" actions={<><Status ok={status==='CONNECTED'}>{status}</Status><Button icon={LogOut} onClick={onClose}>DISCONNECT</Button></>}>{error&&<div className="error-box">{error}</div>}<div ref={element} className="ssh-terminal"/><div className="identity-model-note"><span>Interactive SSH terminal. The saved account is used when you connect. Terminal content is not recorded in the audit log.</span></div></Panel>
 }
-function SSHPage({notify}){
+function SSHPage(props){return <SSHInventoryPage {...props} kind="switches"/>}
+function LinuxServersPage(props){return <SSHInventoryPage {...props} kind="linux-servers"/>}
+function FilesPage(props){return <FileTransferPage {...props} api={api} ui={{Panel,Button,Modal,Table,Status}}/>}
+function SSHInventoryPage({notify,kind,navigate}){
+  const linux=kind==='linux-servers',baseUrl='/api/ssh/'+kind,deviceLabel=linux?'SERVER':'SWITCH'
+
   const[rows,setRows]=useState([]),[sel,setSel]=useState(null),[modal,setModal]=useState(null),[key,setKey]=useState(null),[session,setSession]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false)
-  async function load(){try{setRows(await api('/api/ssh/switches'));setError('')}catch(e){setError(e.message)}}
+  async function load(){try{setRows(await api(baseUrl));setError('')}catch(e){setError(e.message)}}
   useEffect(()=>{load()},[])
-  async function inspect(){setBusy(true);setError('');try{setKey(await api('/api/ssh/switches/'+sel.id+'/inspect',{method:'POST'}));setModal('trust')}catch(e){setError(e.message)}finally{setBusy(false)}}
-  const fields=[{name:'name',label:'SWITCH NAME'},{name:'host',label:'IP ADDRESS / HOSTNAME'},{name:'port',label:'SSH PORT',type:'number',default:22},{name:'username',label:'YOUR SWITCH USERNAME'},{name:'password',label:modal==='edit'?'PASSWORD (EMPTY KEEPS SAVED PASSWORD)':'SWITCH PASSWORD',type:'password'}]
-  async function save(v){const r=await api('/api/ssh/switches'+(modal==='edit'?'/'+sel.id:''),{method:modal==='edit'?'PUT':'POST',body:JSON.stringify({...v,port:Number(v.port)})});setSel(r);notify('SWITCH SAVED','ok');await load()}
-  return <div className="stack ssh-page">{error&&<div className="error-box">{error}</div>}<Panel title={'SAVED SSH SWITCHES / '+rows.length} code="SSH" actions={<><Button icon={Plus} kind="primary" onClick={()=>setModal('new')}>ADD SWITCH</Button><Button icon={RefreshCw} onClick={load}>REFRESH</Button></>}><div className="identity-model-note"><div><b>DIRECT SSH FROM THE MAC</b><span>Switch accounts are separate from Active Directory. Passwords are encrypted in local storage and used only after the device host key is approved.</span></div></div><Table rows={rows} selectedKey={sel?.id} onRow={r=>{setSel(r);setKey(null);setError('')}} cols={[{key:'name',label:'NAME'},{key:'host',label:'HOST'},{key:'port',label:'PORT'},{key:'username',label:'ACCOUNT',render:v=>v||'NEEDED'},{key:'password_configured',label:'PASSWORD',render:v=>v?'SAVED':'NEEDED'},{key:'login',label:'LOGIN',render:(_,r)=><Status ok={Boolean(r.username&&r.password_configured&&r.fingerprint)}>{!r.username?'ACCOUNT NEEDED':!r.password_configured?'PASSWORD NEEDED':!r.fingerprint?'VERIFY KEY':'READY'}</Status>},{key:'fingerprint',label:'HOST KEY',render:v=><Status ok={Boolean(v)}>{v?'APPROVED':'VERIFY FIRST'}</Status>}]}/>{sel&&<div className="inline-tools"><span className="ssh-login-status">{!sel.fingerprint?'Verify the host key first.':!sel.username?'Host key approved · Switch username is missing.':!sel.password_configured?'Host key approved · Switch password is missing.':'Host key and login configured · Ready to connect.'}</span><Button icon={KeyRound} onClick={()=>setModal('edit')}>EDIT / CREDENTIALS</Button><Button icon={ShieldCheck} disabled={busy} onClick={inspect}>{busy?'INSPECTING...':'VERIFY HOST KEY'}</Button><Button icon={Terminal} kind="primary" disabled={!sel.fingerprint||Boolean(session)} onClick={()=>{if(!sel.password_configured||!sel.username){setError('The host key is approved. Save this switch username and password to connect.');setModal('edit')}else{setError('');setSession(sel)}}}>CONNECT</Button><Button icon={Trash2} kind="danger" disabled={Boolean(session)} onClick={()=>setModal('delete')}>DELETE</Button></div>}</Panel>
-  {session&&<SshTerminal device={session} onClose={()=>setSession(null)}/>}
-  {(modal==='new'||modal==='edit')&&<Modal title={modal==='edit'?'EDIT SSH SWITCH':'ADD SSH SWITCH'} subtitle="Credentials are optional when adding inventory. Save your switch account here before connecting." fields={fields} initial={modal==='edit'?{...sel,password:''}:{}} submitLabel="SAVE SWITCH" onClose={()=>setModal(null)} onSubmit={save}/>}
-  {modal==='trust'&&key&&<Modal title="VERIFY SWITCH HOST KEY" subtitle={'Compare this SHA256 fingerprint with the switch console or a trusted administrator before approving. '+key.host+':'+key.port} fields={[]} submitLabel="APPROVE HOST KEY" onClose={()=>setModal(null)} onSubmit={async()=>{const r=await api('/api/ssh/switches/'+sel.id+'/trust',{method:'POST',body:JSON.stringify({fingerprint:key.fingerprint})});setSel(r);load()}}><div className="ssh-fingerprint"><b>{key.algorithm}</b><code>{key.fingerprint}</code><span>Approval is required only once. A changed host key blocks login before sending your password.</span></div></Modal>}
-  {modal==='delete'&&sel&&<Modal title={'REMOVE SWITCH / '+sel.name} fields={[]} danger submitLabel="REMOVE" onClose={()=>setModal(null)} onSubmit={async()=>{await api('/api/ssh/switches/'+sel.id,{method:'DELETE'});setSel(null);await load()}}/>}
+  async function inspect(){setBusy(true);setError('');try{setKey(await api(baseUrl+'/'+sel.id+'/inspect',{method:'POST'}));setModal('trust')}catch(e){setError(e.message)}finally{setBusy(false)}}
+  const fields=[{name:'name',label:deviceLabel+' NAME'},{name:'host',label:'IP ADDRESS / HOSTNAME'},{name:'port',label:'SSH PORT',type:'number',default:22},{name:'username',label:'YOUR '+deviceLabel+' USERNAME'},{name:'password',label:modal==='edit'?'PASSWORD (EMPTY KEEPS SAVED PASSWORD)':deviceLabel+' PASSWORD',type:'password'}]
+  async function save(v){const r=await api(baseUrl+(modal==='edit'?'/'+sel.id:''),{method:modal==='edit'?'PUT':'POST',body:JSON.stringify({...v,port:Number(v.port)})});setSel(r);notify(deviceLabel+' SAVED','ok');await load()}
+  return <div className="stack ssh-page">{error&&<div className="error-box">{error}</div>}<Panel title={(linux?'LINUX SERVERS / ':'SAVED SSH SWITCHES / ')+rows.length} code="SSH" actions={<><Button icon={Plus} kind="primary" onClick={()=>setModal('new')}>ADD {deviceLabel}</Button><Button icon={RefreshCw} onClick={load}>REFRESH</Button></>}><div className="identity-model-note"><div><b>DIRECT SSH FROM THE MAC</b><span>{linux?'Save your Linux servers here and open an interactive SSH terminal.':'Switch accounts are separate from Active Directory.'} Passwords are encrypted in local storage and used only after the host key is approved.</span></div></div><Table rows={rows} selectedKey={sel?.id} onRow={r=>{setSel(r);setKey(null);setError('')}} cols={[{key:'name',label:'NAME'},{key:'host',label:'HOST'},{key:'port',label:'PORT'},{key:'username',label:'ACCOUNT',render:v=>v||'NEEDED'},{key:'password_configured',label:'PASSWORD',render:v=>v?'SAVED':'NEEDED'},{key:'login',label:'LOGIN',render:(_,r)=><Status ok={Boolean(r.username&&r.password_configured&&r.fingerprint)}>{!r.username?'ACCOUNT NEEDED':!r.password_configured?'PASSWORD NEEDED':!r.fingerprint?'VERIFY KEY':'READY'}</Status>},{key:'fingerprint',label:'HOST KEY',render:v=><Status ok={Boolean(v)}>{v?'APPROVED':'VERIFY FIRST'}</Status>}]}/>{sel&&<div className="inline-tools"><span className="ssh-login-status">{!sel.fingerprint?'Verify the host key first.':!sel.username?'Host key approved · SSH username is missing.':!sel.password_configured?'Host key approved · SSH password is missing.':'Host key and login configured · Ready to connect.'}</span><Button icon={KeyRound} onClick={()=>setModal('edit')}>EDIT / CREDENTIALS</Button><Button icon={ShieldCheck} disabled={busy} onClick={inspect}>{busy?'INSPECTING...':'VERIFY HOST KEY'}</Button><Button icon={Terminal} kind="primary" disabled={!sel.fingerprint||Boolean(session)} onClick={()=>{if(!sel.password_configured||!sel.username){setError('The host key is approved. Save this SSH username and password to connect.');setModal('edit')}else{setError('');setSession(sel)}}}>CONNECT</Button><Button icon={Folder} disabled={Boolean(session)} onClick={()=>{sessionStorage.setItem("rsat_file_target",(linux?"linux":"switch")+":"+sel.id);navigate("files")}}>FILES / SFTP</Button><Button icon={Trash2} kind="danger" disabled={Boolean(session)} onClick={()=>setModal('delete')}>DELETE</Button></div>}</Panel>
+  {session&&<SshTerminal baseUrl={baseUrl} device={session} onClose={()=>setSession(null)}/>}
+  {(modal==='new'||modal==='edit')&&<Modal title={(modal==='edit'?'EDIT SSH ':'ADD SSH ')+deviceLabel} subtitle="Credentials are optional when adding inventory. Save the SSH account here before connecting." fields={fields} initial={modal==='edit'?{...sel,password:''}:{}} submitLabel={'SAVE '+deviceLabel} onClose={()=>setModal(null)} onSubmit={save}/>}
+  {modal==='trust'&&key&&<Modal title={'VERIFY '+deviceLabel+' HOST KEY'} subtitle={'Compare this SHA256 fingerprint with the host console or a trusted administrator before approving. '+key.host+':'+key.port} fields={[]} submitLabel="APPROVE HOST KEY" onClose={()=>setModal(null)} onSubmit={async()=>{const r=await api(baseUrl+'/'+sel.id+'/trust',{method:'POST',body:JSON.stringify({fingerprint:key.fingerprint})});setSel(r);load()}}><div className="ssh-fingerprint"><b>{key.algorithm}</b><code>{key.fingerprint}</code><span>Approval is required only once. A changed host key blocks login before sending your password.</span></div></Modal>}
+  {modal==='delete'&&sel&&<Modal title={'REMOVE '+deviceLabel+' / '+sel.name} fields={[]} danger submitLabel="REMOVE" onClose={()=>setModal(null)} onSubmit={async()=>{await api(baseUrl+'/'+sel.id,{method:'DELETE'});setSel(null);await load()}}/>}
   </div>
 }
 
@@ -870,17 +879,17 @@ function App(){
     setShell({summary:val(0),controllers:val(1)||[],replication:val(2)||[],ous:val(3)||[],audit:val(4)||[],health:val(5),settings:val(6)})
   }
   useEffect(()=>{api('/api/auth/me').then(setMe).catch(()=>{});refreshShell();const tick=setInterval(()=>setClock(new Date()),1000);const poll=setInterval(refreshShell,30000);const settingsChanged=()=>{refreshShell();setRevision(x=>x+1)};window.addEventListener('directory-settings-changed',settingsChanged);return()=>{clearInterval(tick);clearInterval(poll);window.removeEventListener('directory-settings-changed',settingsChanged)}},[])
-  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage,ssh:SSHPage,settings:SettingsPage})[section]||Overview,[section])
+  const Page=useMemo(()=>({overview:Overview,domain:Domain,users:UsersPage,groups:GroupsPage,computers:ComputersPage,ous:OUsPage,recycle:RecyclePage,dns:DNSPage,dhcp:DHCPPage,gpo:GPOPage,audit:AuditPage,ssh:SSHPage,linux:LinuxServersPage,files:FilesPage,settings:SettingsPage})[section]||Overview,[section])
   const domain=(shell.summary?.domain||shell.settings?.native?.domain||'DIRECTORY.LOCAL').toUpperCase(),dc=shell.controllers?.[0]?.name||'—'
   return <div className="admin-desktop">
     <header className="app-titlebar">
-      <div className="app-ident"><span className="app-icon">▣</span><b>RSAT FULL :: ACTIVE DIRECTORY ADMINISTRATION CENTER</b><small>v1.2.3</small></div>
+      <div className="app-ident"><span className="app-icon">▣</span><b>RSAT FULL :: ACTIVE DIRECTORY ADMINISTRATION CENTER</b><small>v1.3.0</small></div>
       <div className="connection-strip"><span className={shell.summary?'connected':'red-text'}>[ {shell.summary?'Connected':'Directory offline'} ]</span><span>Domain: <b className="green-text">{domain}</b></span><span>DC: <u>{dc}</u></span><span>{clock.toLocaleDateString()} &nbsp; {clock.toLocaleTimeString()}</span><span>▣ &nbsp; {me?.username||'admin'}⌄</span></div>
     </header>
     <nav className="module-tabs">{nav.map(([id,num,label,Icon])=><button key={id} className={section===id?'active':''} onClick={()=>setSection(id)}><span>[{num}]</span><Icon size={13}/>{label}</button>)}</nav>
     <div className="desktop-main">
       <DirectoryTree section={section} setSection={setSection} shell={shell}/>
-      <div className="page-host">{!shell.health?<div className="loading">READING CONNECTION SETTINGS...</div>:shell.health?.connection_mode==='native'&&['recycle'].includes(section)?<NativeUnavailable section={section}/>:shell.health?.connection_mode==='native'&&section==='gpo'?<NativeGPO key={revision} notify={notify}/>:shell.health?.connection_mode==='native'&&['dns','dhcp'].includes(section)?<ServiceConnection key={section+revision} notify={notify}><Page notify={notify} native/></ServiceConnection>:<Page key={section==='settings'?'settings':revision} notify={notify} native={shell.health?.connection_mode==='native'}/>}</div>
+      <div className="page-host">{!shell.health?<div className="loading">READING CONNECTION SETTINGS...</div>:shell.health?.connection_mode==='native'&&['recycle'].includes(section)?<NativeUnavailable section={section}/>:shell.health?.connection_mode==='native'&&section==='gpo'?<NativeGPO key={revision} notify={notify}/>:shell.health?.connection_mode==='native'&&['dns','dhcp'].includes(section)?<ServiceConnection key={section+revision} notify={notify}><Page notify={notify} native/></ServiceConnection>:<Page key={section==='settings'?'settings':revision} navigate={setSection} notify={notify} native={shell.health?.connection_mode==='native'}/>}</div>
     </div>
     <BottomDock shell={shell} section={section}/>
     <Toast toast={toast}/>

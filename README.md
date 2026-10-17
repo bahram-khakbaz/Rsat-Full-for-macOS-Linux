@@ -27,6 +27,7 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 - User creation and attribute editing
 - Account unlock, enable, disable and deletion
 - Password reset + change-at-next-logon
+- Password forms accept 8+ characters; Active Directory still enforces the account's actual password policy
 - Move users between OUs
 - User group membership view
 - Group inventory and creation/deletion
@@ -84,10 +85,39 @@ The UI uses a self-contained retro systems-console design: dense information, mo
 
 ### SSH and native macOS app
 
-- Switch inventory, encrypted credentials and verified host keys
+- Separate switch and Linux server inventories, encrypted credentials and verified host keys
 - Interactive SSH terminal with per-operator access
 - Native RSAT.app launcher starts the existing Colima profile and services, then opens the panel
 - Saved database and configuration survive app closure and Mac restarts
+- Native file/folder pickers, download save dialog, and standard copy/paste/select-all shortcuts
+
+### File Transfer / SFTP
+
+- Integrated two-pane local selection and remote directory browser; no FileZilla installation needed
+- Reuses each operator's saved Linux/switch SSH account and approved host key
+- Upload files or selected folder trees, drag/drop files, and download files
+- Download a remote directory as ZIP, preserving subfolders and skipping symlinks/special files
+- Sequential transfer queue with byte progress, cancellation, explicit retry and overwrite confirmation
+- Create folders, rename, change Unix permissions, delete files and empty directories
+- Built-in UTF-8 text editor with size/mtime conflict checks before saving
+- Temporary uploads commit only after remote size verification; existing files are not replaced by partial uploads
+- New uploaded files are private (`0600`); replacements preserve ordinary file permissions
+- Admin/network panel roles and the remote SSH account's own permissions govern access
+
+Open **Linux Servers** (or **SSH Switches**), save your SSH account, independently
+verify/approve the host key, then choose **FILES / SFTP**. Alternatively open the
+**File Transfer** tab, select the saved host and click **CONNECT SFTP**. On the
+left, choose files or a folder from the Mac; on the right, browse to the upload
+destination. Select local items and click **UPLOAD SELECTED**. Select remote
+items and choose **DOWNLOAD / ZIP**. The native Mac app presents its own file
+selection and save dialogs.
+
+This connector uses **SFTP over SSH**, not FTP/FTPS. The host must enable an SFTP
+subsystem and accept the saved password login. The current per-file limit is
+512 MiB; UTF-8 editing is limited to 512 KiB. Folder ZIPs allow up to 512 MiB of
+uncompressed file data, 10,000 entries and 32 directory levels. Non-empty folder
+deletion is deliberately non-recursive. Transfers are not resumed after closing
+the page/app. See [File Transfer](docs/FILE_TRANSFER.md) for details and limits.
 
 ### Platform
 

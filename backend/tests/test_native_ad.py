@@ -40,6 +40,24 @@ def test_disable_enable_preserves_other_uac_flags(directory):
     directory.request('POST','/ad/users/tester/enable')
     assert directory.find('tester','user',['userAccountControl'])['userAccountControl']==['66048']
 
+def test_password_reset_uses_admin_reset_and_sets_next_logon_once(directory):
+    directory.conn.extend.microsoft.modify_password=Mock(return_value=True)
+    directory.conn.modify=Mock(return_value=True)
+    result=directory.request('POST','/ad/users/tester/reset-password',
+                             {'new_password':'Abcd12!x','must_change':True})
+    assert result['ok']
+    directory.conn.extend.microsoft.modify_password.assert_called_once_with(DN,'Abcd12!x')
+    directory.conn.modify.assert_called_once_with(DN,{'pwdLastSet':[(MODIFY_REPLACE,[0])]})
+
+def test_rejected_password_does_not_change_logon_flags(directory):
+    directory.conn.extend.microsoft.modify_password=Mock(return_value=False)
+    directory.conn.modify=Mock()
+    directory.conn.result={'result':19,'description':'constraintViolation'}
+    with pytest.raises(HTTPException):
+        directory.request('POST','/ad/users/tester/reset-password',
+                          {'new_password':'Abcd12!x','must_change':True})
+    directory.conn.modify.assert_not_called()
+
 def test_membership_uses_distinguished_names(directory):
     group='CN=Helpdesk,'+BASE
     directory.conn.strategy.add_entry(group,{'objectClass':['top','group'],'name':'Helpdesk','sAMAccountName':'Helpdesk','groupType':-2147483646})

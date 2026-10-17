@@ -41,9 +41,9 @@ class TrustBody(BaseModel):
 def public(row):
     return {k:getattr(row,k) for k in ('id','name','host','port','username','fingerprint')} | {'password_configured':bool(row.password)}
 
-def owned(db, identity, principal):
-    row=db.query(SshSwitch).filter_by(id=identity,owner=principal.username).first()
-    if not row: raise HTTPException(404,'Switch not found')
+def owned(db, identity, principal, model=SshSwitch):
+    row=db.query(model).filter_by(id=identity,owner=principal.username).first()
+    if not row: raise HTTPException(404,'SSH device not found')
     return row
 
 def fingerprint(key):
@@ -119,20 +119,23 @@ async def trust(identity:int,body:TrustBody,p:Principal=Depends(require('ssh.wri
 @router.post('/switches/{identity}/ticket')
 def ticket(identity:int,p:Principal=Depends(require('ssh.connect')),db:Session=Depends(get_db)):
     row=owned(db,identity,p)
-    if not row.fingerprint:raise HTTPException(409,'Inspect and approve the switch host key first')
-    if not row.username.strip():raise HTTPException(409,'Save the switch username first')
-    if not decrypt_secret(row.password):raise HTTPException(409,'Save the switch password first')
+    return issue_ticket(identity,p,row)
+
+def issue_ticket(identity,p,row,scope="switch"):
+    if not row.fingerprint:raise HTTPException(409,'Inspect and approve the SSH device host key first')
+    if not row.username.strip():raise HTTPException(409,'Save the SSH device username first')
+    if not decrypt_secret(row.password):raise HTTPException(409,'Save the SSH device password first')
     now=time.monotonic()
     for key in list(_tickets):
         if _tickets[key]['expires']<now: _tickets.pop(key,None)
     if len(_tickets)>500:raise HTTPException(429,'Too many pending connections')
     key=secrets.token_urlsafe(32)
-    _tickets[key]={'identity':identity,'principal':p,'expires':now+30}
+    _tickets[key]={'identity':identity,'principal':p,'expires':now+30,'scope':scope}
     return {'ticket':key}
 
-def consume_ticket(key,identity):
+def consume_ticket(key,identity,scope="switch"):
     entry=_tickets.pop(key,None)
-    if not entry or entry['identity']!=identity or entry['expires']<time.monotonic():
+    if not entry or entry['identity']!=identity or entry.get('scope','switch')!=scope or entry['expires']<time.monotonic():
         raise HTTPException(401,'Connection ticket expired. Click Connect again.')
     return entry['principal']
 
@@ -140,7 +143,7 @@ def open_shell(row):
     t=transport(row['host'],row['port'])
     try:
         if not secrets.compare_digest(fingerprint(t.get_remote_server_key()),row['fingerprint']):
-            raise HTTPException(409,'Switch host key changed. No password was sent. Verify the new key first.')
+            raise HTTPException(409,'SSH host key changed. No password was sent. Verify the new key first.')
         password=decrypt_secret(row['password'])
         try:
             t.auth_password(row['username'],password,fallback=False)
@@ -148,7 +151,7 @@ def open_shell(row):
             if 'keyboard-interactive' not in exc.allowed_types:raise
             def answer(title,instructions,prompts):
                 if len(prompts)!=1 or prompts[0][1] or 'password' not in prompts[0][0].lower() or any(word in prompts[0][0].lower() for word in ('new','otp','token','code')):
-                    raise HTTPException(409,'This switch requires an additional authentication challenge. Saved-password login cannot answer it.')
+                    raise HTTPException(409,'This SSH host requires an additional authentication challenge. Saved-password login cannot answer it.')
                 return [password]
             t.auth_interactive(row['username'],answer)
         t.set_keepalive(20)
@@ -162,6 +165,9 @@ def open_shell(row):
 
 @router.websocket('/switches/{identity}/terminal')
 async def terminal(ws:WebSocket,identity:int):
+    await terminal_session(ws,identity)
+
+async def terminal_session(ws:WebSocket,identity:int,model=SshSwitch,scope="switch"):
     # Ticket travels in the first frame, never in URLs or HTTP access logs.
     origin=ws.headers.get('origin')
     if origin and urlparse(origin).netloc!=ws.headers.get('host'):
@@ -171,9 +177,9 @@ async def terminal(ws:WebSocket,identity:int):
     tasks=[];p=None;host=''
     try:
         hello=await asyncio.wait_for(ws.receive_json(),timeout=10)
-        p=consume_ticket(hello.get('ticket',''),identity)
+        p=consume_ticket(hello.get('ticket',''),identity,scope)
         with SessionLocal() as db:
-            r=owned(db,identity,p)
+            r=owned(db,identity,p,model)
             row={k:getattr(r,k) for k in ('host','port','username','password','fingerprint')}
             host=r.host
         t,channel=await run_in_threadpool(open_shell,row)
@@ -212,8 +218,10 @@ async def terminal(ws:WebSocket,identity:int):
         if channel:channel.close()
         if t:t.close()
         for task in tasks:task.cancel()
+        # The peer may cancel the websocket task at its next await. Record
+        # disconnect after closing the native handles, before yielding again.
+        if p and t:
+            with SessionLocal() as db:write_audit(db,p,'ssh.disconnect',host)
         if tasks:await asyncio.gather(*tasks,return_exceptions=True)
         try:await ws.close()
         except Exception:pass
-        if p and t:
-            with SessionLocal() as db:write_audit(db,p,'ssh.disconnect',host)

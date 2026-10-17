@@ -34,8 +34,8 @@ logdir = Path.home()/'Library/Logs/RSAT'
 shutil.copyfile(repo/'macos/start-rsat.sh', contents/'Resources/start-rsat.sh')
 with (contents/'Info.plist').open('wb') as handle:
     plistlib.dump({'CFBundleExecutable':'RSATLauncher', 'CFBundleIdentifier':'com.bahram.rsat.mac',
-                  'CFBundleName':'RSAT', 'CFBundlePackageType':'APPL', 'CFBundleVersion':'1',
-                  'CFBundleShortVersionString':'1.0', 'LSMinimumSystemVersion':'13.0',
+                  'CFBundleName':'RSAT', 'CFBundlePackageType':'APPL', 'CFBundleVersion':'3',
+                  'CFBundleShortVersionString':'1.3.0', 'LSMinimumSystemVersion':'13.0',
                   'NSHighResolutionCapable':True,
                   'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}}, handle)
 subprocess.run(['codesign', '--force', '--sign', '-', str(output)], check=True)
