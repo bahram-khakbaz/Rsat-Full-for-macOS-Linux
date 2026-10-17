@@ -1,5 +1,37 @@
 # Security model
 
+## Publication hygiene
+
+Keep real connection settings, host inventories, credentials, LDAP/DNS exports,
+logs, screenshots, recordings, database backups and built local app bundles out
+of GitHub. The app bundle records the local checkout path. Never package the
+private `.env`, database volume or local `outputs` folder in a release.
+
+Before pushing or publishing, run from the repository root:
+
+```bash
+python3 scripts/check-publication.py --history
+gitleaks git --redact --no-banner --log-opts=--all .
+```
+
+Install Gitleaks from its [official repository](https://github.com/gitleaks/gitleaks).
+The path guard checks the Git index and reachable history without reading private
+untracked runtime data. Gitleaks scans committed content for recognized secrets;
+also scan staged changes with `gitleaks git --staged --redact --no-banner .` before
+committing. Neither tool understands every organization's confidential data.
+Review staged diffs for real hostnames, IP inventories, account names and business
+content as well. Demo/test fixtures must remain synthetic.
+
+The Publication hygiene workflow runs the path guard and a checksum-verified,
+pinned Gitleaks release over full history. CI detects problems after a push;
+run the local checks first to avoid publishing a secret in the first place.
+`.gitignore` reduces accidental inclusion but is not a security boundary.
+
+If a real secret was committed, remove it from current files, revoke/rotate it,
+and assess every branch, tag and release. Deleting a file in a later commit does
+not remove its history. History cleanup requires coordination with collaborators
+and cannot recall copies already downloaded.
+
 This repository intentionally contains no organization-specific domain names, IP addresses, credentials, API keys, or tokens.
 
 ## Identity separation

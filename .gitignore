@@ -1,5 +1,7 @@
 .env
 *.env
+.env.*
+*.env.*
 !.env.example
 __pycache__/
 *.py[cod]
@@ -19,3 +21,26 @@ coverage/
 *.app/
 .macos-build/
 module-cache/
+
+# Private runtime data, exports and publication-audit output
+outputs/
+backups/
+downloads/
+secrets/
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+*.bak
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.crt
+*.kdbx
+*.pcap
+*.pcapng
+Screenshot*.png
+Screenshot*.jpg
+codex-clipboard-*.png

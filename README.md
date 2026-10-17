@@ -191,6 +191,12 @@ For additional Windows RSAT/GPO features, start `windows-agent/run-worker.ps1` o
 
 ## Security model
 
+The repository contains synthetic demo/test data only. Real domain settings,
+host inventories, credentials and audit events belong in the private local
+environment/database, never in source control. See the
+[publication checklist](docs/SECURITY.md#publication-hygiene) before sharing a
+fork, release, screenshot or diagnostic export.
+
 - No domain credential is stored in the frontend.
 - The control plane never exposes a generic PowerShell endpoint.
 - Worker calls are protected by an internal high-entropy credential created automatically on Windows.
