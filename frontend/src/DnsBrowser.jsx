@@ -5,6 +5,7 @@ import {dnsFolderView,dnsBreadcrumbs,relativeDnsName,withinDnsFolder} from './dn
 export default function DnsBrowser({records,zones,zone,folder,onFolder,onZone,query,selected,onSelect,loading,Table,Button}){
   const view=useMemo(()=>dnsFolderView(records,zone,folder,query),[records,zone,folder,query])
   const crumbs=dnsBreadcrumbs(folder)
+  const shownZones=useMemo(()=>[...zones].sort((a,b)=>Number(b.name===zone)-Number(a.name===zone)),[zones,zone])
   function branch(path='',depth=0){
     if(depth>127)return null
     return dnsFolderView(records,zone,path).folders.map(child=>{
@@ -20,7 +21,7 @@ export default function DnsBrowser({records,zones,zone,folder,onFolder,onZone,qu
   return <div className="dns-browser">
     <aside className="dns-zone-tree" aria-label="DNS zones and subdomains">
       <div className="dns-tree-caption">DNS ZONES / {zones.length}</div>
-      {zones.map(item=><div key={item.name}>
+      {shownZones.map(item=><div key={item.name}>
         <button className={'dns-tree-zone '+(zone===item.name&&!folder?'active':'')} onClick={()=>onZone(item.name)} title={item.name}><Globe2 size={14}/><span>{item.name}</span></button>
         {zone===item.name&&branch()}
       </div>)}
