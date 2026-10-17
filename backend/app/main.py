@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from .config import settings
 from .db import init_db
-from .routers import sftp, linux_servers, ssh, network_settings, auth, ad, network, gpo, audit, domain, settings as settings_router
+from .routers import ipam, sftp, linux_servers, ssh, network_settings, auth, ad, network, gpo, audit, domain, settings as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +32,7 @@ app.add_middleware(
 )
 app.include_router(ssh.router)
 app.include_router(linux_servers.router)
+app.include_router(ipam.router)
 app.include_router(sftp.router)
 app.include_router(network_settings.router)
 app.include_router(auth.router)

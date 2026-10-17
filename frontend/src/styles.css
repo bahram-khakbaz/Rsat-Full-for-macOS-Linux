@@ -460,6 +460,25 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .file-transfer-page .empty{line-height:1.6;overflow-wrap:anywhere}
 .file-transfer-page progress{max-width:100%}
 .file-queue-message{overflow-wrap:anywhere}
+.ipam-networks{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;padding:12px}
+.ipam-network{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px;min-width:0;text-align:left;border:1px solid var(--line);background:#061a1b;color:var(--text)}
+.ipam-network.active{border-color:var(--cyan);background:#103233}
+.ipam-network strong,.ipam-network code{overflow-wrap:anywhere;max-width:100%}
+.ipam-network code{font-size:12px}
+.ipam-network small{color:var(--muted)}
+.ipam-counts{display:flex;flex-wrap:wrap;gap:8px;font-size:10px;line-height:1.5}
+.ipam-free{color:var(--green)}.ipam-used{color:#ffb783}.ipam-reserved{color:#98caff}.ipam-unknown{color:var(--muted)}
+.ipam-filter{justify-content:space-between;line-height:1.7}
+.ipam-filter label{display:flex;align-items:center;gap:8px}
+.ipam-filter span{font-size:10px;overflow-wrap:anywhere}
+.ipam-panel .identity-model-note{display:block;margin-bottom:8px}
+.ipam-panel .identity-model-note span{font-size:10px;line-height:1.6}
+.ipam-panel .table-shell{max-height:340px}
+.ipam-panel .table-shell table{min-width:0}
+.ipam-panel .table-shell thead{position:sticky;top:0}
+.ipam-panel .table-shell th:first-child{width:85px}
+.ipam-panel select{background:#061a1b;border:1px solid var(--line);padding:6px;color:var(--text);color-scheme:dark}
+.ipam-boundaries{padding:12px;font-size:10px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
 @media(min-width:1700px){
   .file-browser-panel .panel-title{min-height:42px}
   .file-browser-panel .inline-tools{min-height:54px}

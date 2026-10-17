@@ -133,6 +133,25 @@ uncompressed file data, 10,000 entries and 32 directory levels. Non-empty folder
 deletion is deliberately non-recursive. Transfers are not resumed after closing
 the page/app. See [File Transfer](docs/FILE_TRANSFER.md) for details and limits.
 
+### VLAN / manual IP allocation
+
+Below **Linux Servers**, maintain per-operator IPv4 subnet inventories with free,
+used, reserved and unknown counts. Select a VLAN, leave **ONLY FREE IPs** checked,
+and check an address to mark it used; it disappears from the free list after the
+save succeeds. Uncheck the filter to view all addresses and release an allocation
+or set its status explicitly. Changes are saved immediately in the local database
+and audited. Reserved addresses have a disabled Used checkbox; change their status
+explicitly with the allocation selector if needed.
+
+Network and broadcast addresses are excluded from usable totals. Gateways must be
+reserved explicitly. New subnets default to unknown status, overlapping subnets in
+the same operator's inventory are rejected, and stale updates from another window
+are blocked until refresh. Supported subnet sizes are /20 through /30. This is a
+manual allocation register: it does not scan devices, reserve DHCP leases, change
+VLANs on switches or prove that a free-labelled address is safe to assign.
+
+Real inventories remain in the local database, never in demo fixtures or GitHub.
+
 ### Platform
 
 - FastAPI control plane

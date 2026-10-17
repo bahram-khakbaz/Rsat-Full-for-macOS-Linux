@@ -55,6 +55,16 @@ class SshSwitch(Base):
     password: Mapped[str] = mapped_column(Text, default="")
     fingerprint: Mapped[str] = mapped_column(String(100), default="")
 
+class IpamVlan(Base):
+    __tablename__ = "ipam_vlans"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    cidr: Mapped[str] = mapped_column(String(32))
+    default_status: Mapped[str] = mapped_column(String(16), default="unknown")
+    states: Mapped[str] = mapped_column(Text, default="{}")
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
 class SshLinuxServer(Base):
     __tablename__ = "ssh_linux_servers"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
