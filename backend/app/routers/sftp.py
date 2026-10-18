@@ -46,7 +46,7 @@ def owned(db, kind, identity, principal):
 def require_login(row):
     if not row.fingerprint:
         raise HTTPException(409, "Verify and approve this host key in SSH / Linux Servers first")
-    if not row.username.strip() or not decrypt_secret(row.password):
+    if not row.username.strip() or not row.password:
         raise HTTPException(409, "Save this server's SSH username and password first")
 
 
@@ -60,7 +60,10 @@ def connection(row):
             ssh.fingerprint(transport.get_remote_server_key()), row.fingerprint,
         ):
             raise HTTPException(409, "SSH host key changed. No password was sent. Verify it again.")
-        transport.auth_password(row.username, decrypt_secret(row.password), fallback=False)
+        password = decrypt_secret(row.password)
+        if not password:
+            raise HTTPException(409, "The saved SSH credential is unavailable")
+        transport.auth_password(row.username, password, fallback=False)
         client = paramiko.SFTPClient.from_transport(transport)
         client.get_channel().settimeout(30)
         yield client

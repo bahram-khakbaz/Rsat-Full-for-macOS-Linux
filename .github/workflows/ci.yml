@@ -36,6 +36,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate gMSA task definition without registering it
+        shell: powershell
+        run: .\windows-agent\tests\Test-GmsaTask.ps1
+      - name: Test unattended pairing file lifecycle
+        shell: pwsh
+        run: python windows-agent/tests/test_unattended.py
+      - name: Test worker pairing lifecycle
+        shell: pwsh
+        run: |
+          python -m pip install -r windows-agent/requirements.txt httpx==0.28.1
+          python windows-agent/tests/test_pairing.py
       - name: Parse Windows worker scripts
         shell: pwsh
         run: |

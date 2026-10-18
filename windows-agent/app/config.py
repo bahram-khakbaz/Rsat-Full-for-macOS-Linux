@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     agent_token: str = "change-me"
     pairing_code: str = ""
+    pairing_code_file: str = ""
     pairing_ttl_seconds: int = 900
     listen_host: str = "0.0.0.0"
     listen_port: int = 8765

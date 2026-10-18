@@ -27,6 +27,8 @@ outputs/
 backups/
 downloads/
 secrets/
+vault-runtime/
+worker-state/
 *.sqlite
 *.sqlite3
 *.sql

@@ -1,0 +1,9 @@
+# Opt-in only; use with docker-compose.yml after provisioning Vault Agent.
+services:
+  backend:
+    environment:
+      VAULT_CREDENTIAL_DIR: /run/rsat-vault
+      VAULT_MAX_AGE_SECONDS: 180
+    volumes:
+      # Mount the directory: Agent replaces delivery files atomically.
+      - ${RSAT_VAULT_DELIVERY_DIR:?Set the private Agent delivery directory}:/run/rsat-vault:ro

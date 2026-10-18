@@ -23,6 +23,7 @@ from ldap3.utils.dn import escape_rdn, parse_dn
 
 from .db import SessionLocal, SystemSetting, DomainControllerConfig
 from .secret_store import decrypt_secret
+from .vault_agent import metadata as credential_metadata
 
 _auth_lock = threading.RLock()
 _failed_credentials = set()
@@ -54,7 +55,7 @@ def configuration():
 
 def public_configuration(rows):
     cfg = json.loads(rows.get("native_config", "{}"))
-    return {**{k:cfg.get(k, "") for k in ("domain", "username", "preferred_dc", "ca_pem")}, "password_configured": bool(rows.get("native_password")), "capabilities": SUPPORTED, "trusted_dc_certificates": list(json.loads(rows.get("native_certificate_pins", "{}")))}
+    return {**{k:cfg.get(k, "") for k in ("domain", "username", "preferred_dc", "ca_pem")}, **credential_metadata(rows.get("native_password", "")), "password_configured": bool(rows.get("native_password")), "capabilities": SUPPORTED, "trusted_dc_certificates": list(json.loads(rows.get("native_certificate_pins", "{}")))}
 
 def certificate_details(host, der):
     cert = x509.load_der_x509_certificate(der)

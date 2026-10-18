@@ -1,5 +1,57 @@
 # Windows Admin Worker
 
+## gMSA unattended startup
+
+`install-gmsa-task.ps1` registers a Task Scheduler startup task under an existing
+gMSA. It is a startup task, not a Windows Service wrapper. It does not create an
+AD account, change KDS/domain settings, grant AD rights or ask for a gMSA password.
+Windows manages that account's password; the worker inherits its security token.
+
+Prerequisites:
+
+- A dedicated domain-joined management host, not a DC, with RSAT modules and a
+  machine-wide Python installation usable by the gMSA.
+- An administrator-provisioned gMSA, the host authorized to retrieve its password,
+  `Install-ADServiceAccount` completed on the host, and `Test-ADServiceAccount`
+  returning true. Use the same domain as the management host.
+- Delegate only necessary AD/DNS/DHCP/GPO rights. Do not make it a Domain Admin.
+  The account needs the applicable batch-logon right; organizational policy must
+  not deny it. The task requests Limited run level.
+- An administrator-owned deployment directory and `.env`, readable by the gMSA
+  but not writable by other operators. Check ACLs on the entire code/venv tree
+  and Python installation; the task does not harden that deployment tree for you.
+- Initialize `.venv`, dependencies and a strong channel credential with the normal
+  setup first. Stop the foreground worker before starting the task on its port.
+
+From an elevated PowerShell in the worker deployment directory:
+
+```powershell
+.\install-gmsa-task.ps1 -Account 'EXAMPLE\rsatWorker$' -WhatIf
+.\install-gmsa-task.ps1 -Account 'EXAMPLE\rsatWorker$'
+Start-ScheduledTask -TaskName 'RSAT-Full-Worker'
+Get-Content "$env:ProgramData\RSATFull\Worker\pairing-code.txt"
+```
+
+Pair in the Mac panel within 15 minutes. The installer ACL-protects the state
+directory for SYSTEM, Administrators and the gMSA. Pairing codes are atomically
+replaced at each start, never printed by the unattended runner and removed after
+successful pairing or normal shutdown. A code left after a crash is unusable
+without that running process. Pairing remains single-use. The existing encrypted
+worker channel credential is separate from the gMSA password and remains necessary.
+
+The installer refuses to replace an existing task. It does not bypass script
+execution policy or create firewall exceptions. Apply signing, TLS/network access
+controls and deployment ACLs according to your environment before starting it.
+Use `Stop-ScheduledTask` to stop and `Unregister-ScheduledTask` to remove the task;
+neither removes the AD account or local `.env`. Review protected files separately.
+
+CI validates PowerShell syntax, creates an unregistered synthetic task definition
+and checks pairing-file lifecycle. Actual gMSA logon, Kerberos delegation and AD
+operations still require an authorized Windows domain-host acceptance test.
+
+References: [Microsoft gMSA management](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/manage-group-managed-service-accounts),
+[Task Scheduler principals](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal).
+
 Use a dedicated, domain-joined Windows management VM or workstation. Do **not** run the worker on a domain controller.
 
 ## Identity model

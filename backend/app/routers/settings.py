@@ -12,7 +12,7 @@ from ..auth import Principal, require
 from ..config import settings
 from ..db import DomainControllerConfig, SiteConfig, SystemSetting, get_db
 from ..runtime_config import get_runtime_config
-from ..secret_store import encrypt_secret
+from ..secret_store import encrypt_secret, store_credential
 from ..native_ad import public_configuration
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -359,6 +359,7 @@ class NativeBody(BaseModel):
     username: str = Field(min_length=3, max_length=256)
     preferred_dc: str = Field(default="", max_length=253)
     password: str | None = Field(default=None, max_length=1024)
+    vault_key: str | None = Field(default=None, max_length=80)
     ca_pem: str = Field(default="", max_length=65536)
 
 
@@ -384,10 +385,10 @@ def save_native(body: NativeBody, principal: Principal = Depends(require("settin
     rows = _settings_rows(db)
     previous = json.loads(rows.get("native_config", "{}"))
     identity_changed = any(previous.get(k) != cfg[k] for k in ("domain", "username"))
-    if not body.password and (identity_changed or not rows.get("native_password")):
+    if not (body.password or body.vault_key) and (identity_changed or not rows.get("native_password")):
         raise HTTPException(422, "Enter the AD password for this account")
-    if body.password:
-        _upsert(db, "native_password", encrypt_secret(body.password))
+    credential = store_credential(body.password or "", body.vault_key, principal.username, rows.get("native_password", ""))
+    _upsert(db, "native_password", credential)
     _upsert(db, "native_config", json.dumps(cfg))
     _upsert(db, "connection_mode", "native")
     _upsert(db, "demo_mode", "false")

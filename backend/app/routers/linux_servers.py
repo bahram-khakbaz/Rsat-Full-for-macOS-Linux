@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from ..auth import Principal, require
 from ..audit import write_audit
 from ..db import SshLinuxServer, get_db
-from ..secret_store import encrypt_secret
+from ..secret_store import store_credential
 from . import ssh
 
 router = APIRouter(prefix="/api/ssh/linux-servers", tags=["linux-servers"])
@@ -28,8 +28,8 @@ def servers(p: Principal = Depends(require("ssh.read")), db: Session = Depends(g
 def create(body: ssh.SwitchBody, p: Principal = Depends(require("ssh.write")),
            db: Session = Depends(get_db)):
     row = SshLinuxServer(owner=p.username,
-        **body.model_dump(exclude={"password"}),
-        password=encrypt_secret(body.password), fingerprint="")
+        **body.model_dump(exclude={"password", "vault_key"}),
+        password=store_credential(body.password,body.vault_key,p.username), fingerprint="")
     db.add(row); db.commit(); db.refresh(row)
     write_audit(db, p, "ssh.linux.create", row.host)
     return ssh.public(row)
@@ -40,14 +40,13 @@ def update(identity: int, body: ssh.SwitchBody,
            p: Principal = Depends(require("ssh.write")), db: Session = Depends(get_db)):
     row = owned(db, identity, p)
     changed = (row.host, row.port) != (body.host, body.port)
-    if changed and not body.password:
+    if changed and not (body.password or body.vault_key):
         raise HTTPException(422, "Changing the host requires entering its password again")
     if changed:
         row.fingerprint = ""
-    for key, value in body.model_dump(exclude={"password"}).items():
+    for key, value in body.model_dump(exclude={"password", "vault_key"}).items():
         setattr(row, key, value)
-    if body.password:
-        row.password = encrypt_secret(body.password)
+    row.password = store_credential(body.password,body.vault_key,p.username,row.password)
     db.commit()
     write_audit(db, p, "ssh.linux.update", row.host)
     return ssh.public(row)

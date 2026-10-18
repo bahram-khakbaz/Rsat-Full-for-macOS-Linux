@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 class Settings(BaseSettings):
     app_name: str = "RSAT Full Admin Center"
@@ -11,6 +12,8 @@ class Settings(BaseSettings):
     demo_mode: bool = True
     worker_url: str = ""
     worker_token: str = ""
+    vault_credential_dir: str = ""
+    vault_max_age_seconds: int = Field(default=180, ge=30, le=3600)
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

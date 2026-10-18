@@ -15,7 +15,8 @@ from starlette.concurrency import run_in_threadpool
 from ..auth import Principal, require
 from ..audit import write_audit
 from ..db import SessionLocal, SshSwitch, get_db
-from ..secret_store import encrypt_secret, decrypt_secret
+from ..secret_store import encrypt_secret, decrypt_secret, store_credential
+from ..vault_agent import metadata as credential_metadata
 
 router = APIRouter(prefix='/api/ssh', tags=['ssh'])
 _tickets = {}
@@ -26,6 +27,7 @@ class SwitchBody(BaseModel):
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(default="", max_length=255)
     password: str = Field(default='', max_length=4096)
+    vault_key: str | None = Field(default=None, max_length=80)
     @field_validator('host')
     @classmethod
     def host_only(cls, value):
@@ -39,7 +41,7 @@ class TrustBody(BaseModel):
     fingerprint: str = Field(min_length=20, max_length=100)
 
 def public(row):
-    return {k:getattr(row,k) for k in ('id','name','host','port','username','fingerprint')} | {'password_configured':bool(row.password)}
+    return {k:getattr(row,k) for k in ('id','name','host','port','username','fingerprint')} | {'password_configured':bool(row.password)} | credential_metadata(row.password)
 
 def owned(db, identity, principal, model=SshSwitch):
     row=db.query(model).filter_by(id=identity,owner=principal.username).first()
@@ -78,7 +80,7 @@ def switches(p:Principal=Depends(require('ssh.read')),db:Session=Depends(get_db)
 
 @router.post('/switches')
 def create(body:SwitchBody,p:Principal=Depends(require('ssh.write')),db:Session=Depends(get_db)):
-    row=SshSwitch(owner=p.username,**body.model_dump(exclude={'password'}),password=encrypt_secret(body.password),fingerprint='')
+    row=SshSwitch(owner=p.username,**body.model_dump(exclude={'password','vault_key'}),password=store_credential(body.password,body.vault_key,p.username),fingerprint='')
     db.add(row);db.commit();db.refresh(row)
     write_audit(db,p,'ssh.switch.create',row.host)
     return public(row)
@@ -87,11 +89,11 @@ def create(body:SwitchBody,p:Principal=Depends(require('ssh.write')),db:Session=
 def update(identity:int,body:SwitchBody,p:Principal=Depends(require('ssh.write')),db:Session=Depends(get_db)):
     row=owned(db,identity,p)
     destination_changed=(row.host,row.port)!=(body.host,body.port)
-    if destination_changed and not body.password:
+    if destination_changed and not (body.password or body.vault_key):
         raise HTTPException(422,'Changing the host requires entering its password again')
     if destination_changed:row.fingerprint=''
-    for k,v in body.model_dump(exclude={'password'}).items():setattr(row,k,v)
-    if body.password:row.password=encrypt_secret(body.password)
+    for k,v in body.model_dump(exclude={'password','vault_key'}).items():setattr(row,k,v)
+    row.password=store_credential(body.password,body.vault_key,p.username,row.password)
     db.commit();write_audit(db,p,'ssh.switch.update',row.host)
     return public(row)
 
@@ -124,7 +126,7 @@ def ticket(identity:int,p:Principal=Depends(require('ssh.connect')),db:Session=D
 def issue_ticket(identity,p,row,scope="switch"):
     if not row.fingerprint:raise HTTPException(409,'Inspect and approve the SSH device host key first')
     if not row.username.strip():raise HTTPException(409,'Save the SSH device username first')
-    if not decrypt_secret(row.password):raise HTTPException(409,'Save the SSH device password first')
+    if not row.password:raise HTTPException(409,'Save the SSH device password or Vault Agent key first')
     now=time.monotonic()
     for key in list(_tickets):
         if _tickets[key]['expires']<now: _tickets.pop(key,None)
@@ -145,6 +147,7 @@ def open_shell(row):
         if not secrets.compare_digest(fingerprint(t.get_remote_server_key()),row['fingerprint']):
             raise HTTPException(409,'SSH host key changed. No password was sent. Verify the new key first.')
         password=decrypt_secret(row['password'])
+        if not password:raise HTTPException(409,'The saved SSH credential is unavailable')
         try:
             t.auth_password(row['username'],password,fallback=False)
         except paramiko.BadAuthenticationType as exc:

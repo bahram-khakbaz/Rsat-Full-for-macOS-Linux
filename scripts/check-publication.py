@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-PRIVATE_DIRS = {"outputs", "backups", "downloads", "secrets", "node_modules", ".venv"}
+PRIVATE_DIRS = {"outputs", "backups", "downloads", "secrets", "node_modules", ".venv", "vault-runtime", "worker-state"}
 PRIVATE_SUFFIXES = {
     ".db", ".sqlite", ".sqlite3", ".sql", ".dump", ".bak", ".log",
     ".pem", ".key", ".cer", ".crt", ".p12", ".pfx", ".kdbx", ".pcap", ".pcapng",

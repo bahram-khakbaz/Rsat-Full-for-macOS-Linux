@@ -213,6 +213,16 @@ For additional Windows RSAT/GPO features, start `windows-agent/run-worker.ps1` o
 
 ## Security model
 
+Optional [Vault Agent delivery](docs/VAULT_AGENT.md) keeps AD/SSH password values
+out of the application database; RSAT stores operator-scoped references and reads
+fresh, protected deliveries on use. The app does not receive a Vault token. Local
+encrypted storage remains the default and no existing credentials are migrated.
+
+The [gMSA startup-task installer](docs/WINDOWS_WORKER.md#gmsa-unattended-startup)
+provides an opt-in unattended Windows Worker path without an operator-entered AD
+password. It requires a pre-provisioned, host-authorized gMSA and delegated rights.
+Automated task-definition checks do not replace validation on a real domain host.
+
 The repository contains synthetic demo/test data only. Real domain settings,
 host inventories, credentials and audit events belong in the private local
 environment/database, never in source control. See the

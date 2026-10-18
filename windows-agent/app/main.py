@@ -45,6 +45,12 @@ try { Import-Module ActiveDirectory; $domain=(Get-ADDomain).DNSRoot } catch {}
 [pscustomobject]@{runAs=$who;computer=$env:COMPUTERNAME;domain=$domain} | ConvertTo-Json -Compress
 """)
     _pairing_used = True
+    if settings.pairing_code_file:
+        from pathlib import Path
+        try:
+            Path(settings.pairing_code_file).unlink(missing_ok=True)
+        except OSError:
+            pass  # The already-consumed code cannot be used again.
     return {
         "ok": True,
         "worker_token": settings.agent_token,
