@@ -284,7 +284,7 @@ function UsersPage({notify,native=false}){
     a.href=url;a.download='rsat-users.csv';a.click();URL.revokeObjectURL(url);notify('CSV EXPORTED','ok')
   }
   const detailRows={
-    General:[['Full Name',detail?.displayName],['Display Name',detail?.displayName],['Username',detail?.samAccountName],['Email',detail?.mail],['Department',detail?.department],['Title',detail?.title],['Company',detail?.company],['Manager',detail?.manager],['Mobile',detail?.mobile],['Employee ID',detail?.employeeId],['Distinguished Name',detail?.dn]],
+    General:[['Full Name',detail?.displayName],['Display Name',detail?.displayName],['Username',detail?.samAccountName],['Email',detail?.mail],['Department',detail?.department],['Title',detail?.title],['Company',detail?.company],['Manager',detail?.manager],['Mobile',detail?.mobile||'—'],['Additional Mobile',Array.isArray(detail?.otherMobile)?detail.otherMobile.join(' · ')||'—':detail?.otherMobile||'—'],['Office Phone',detail?.telephoneNumber||'—'],['Home Phone',detail?.homePhone||'—'],['IP Phone',detail?.ipPhone||'—'],['Employee ID',detail?.employeeId],['Distinguished Name',detail?.dn]],
     Organization:[['Department',detail?.department],['Title',detail?.title],['Company',detail?.company],['Manager',detail?.manager],['Office',detail?.office]],
     Account:[['Status',detail?.enabled?'Enabled':'Disabled'],['Locked Out',detail?.lockedOut?'Yes':'No'],['Last Logon',detail?.lastLogon],['Created',detail?.created],['Password Last Set',detail?.passwordLastSet],['Password Expires',detail?.passwordExpires],['Password Never Expires',detail?.passwordNeverExpires?'Yes':'No']],
     'Member Of':groups.map(g=>[g.name,g.scope||'Group']),

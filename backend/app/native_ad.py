@@ -129,7 +129,7 @@ def parent(dn):
     parts = parse_dn(dn)
     return "".join(a + "=" + b + sep for a, b, sep in parts[1:])
 
-USER_ATTRS = ["sAMAccountName", "displayName", "givenName", "sn", "mail", "department", "title", "company", "manager", "mobile", "employeeID", "physicalDeliveryOfficeName", "userAccountControl", "msDS-User-Account-Control-Computed", "lastLogonTimestamp", "whenCreated", "pwdLastSet", "msDS-UserPasswordExpiryTimeComputed"]
+USER_ATTRS = ["sAMAccountName", "displayName", "givenName", "sn", "mail", "department", "title", "company", "manager", "mobile", "otherMobile", "telephoneNumber", "homePhone", "ipPhone", "employeeID", "physicalDeliveryOfficeName", "userAccountControl", "msDS-User-Account-Control-Computed", "lastLogonTimestamp", "whenCreated", "pwdLastSet", "msDS-UserPasswordExpiryTimeComputed"]
 COMPUTER_ATTRS = ["name", "sAMAccountName", "operatingSystem", "dNSHostName", "userAccountControl", "lastLogonTimestamp"]
 GROUP_ATTRS = ["name", "sAMAccountName", "description", "groupType"]
 
@@ -244,7 +244,11 @@ class Directory:
     def user(self, x):
         uac, computed = number(x, "userAccountControl"), number(x, "msDS-User-Account-Control-Computed")
         mapping = {"samAccountName":"sAMAccountName", "displayName":"displayName", "givenName":"givenName", "surname":"sn", "mail":"mail", "department":"department", "title":"title", "company":"company", "manager":"manager", "mobile":"mobile", "employeeId":"employeeID", "office":"physicalDeliveryOfficeName"}
-        return {**{k:scalar(x,v) for k,v in mapping.items()}, "dn":x["dn"], "ou":parent(x["dn"]), "enabled":not bool(uac & 2), "lockedOut":bool(computed & 16), "passwordExpired":bool(computed & 8388608), "passwordNeverExpires":bool(uac & 65536), "lastLogon":date(scalar(x,"lastLogonTimestamp")), "created":date(scalar(x,"whenCreated")), "passwordLastSet":date(scalar(x,"pwdLastSet")), "passwordExpires":date(scalar(x,"msDS-UserPasswordExpiryTimeComputed"))}
+        mapping.update({"telephoneNumber":"telephoneNumber", "homePhone":"homePhone", "ipPhone":"ipPhone"})
+        # Keep additional numbers separate: editing mobile must never overwrite otherMobile.
+        mapped = {k:scalar(x,v) for k,v in mapping.items()}
+        mapped["otherMobile"] = values(x, "otherMobile")
+        return {**mapped, "dn":x["dn"], "ou":parent(x["dn"]), "enabled":not bool(uac & 2), "lockedOut":bool(computed & 16), "passwordExpired":bool(computed & 8388608), "passwordNeverExpires":bool(uac & 65536), "lastLogon":date(scalar(x,"lastLogonTimestamp")), "created":date(scalar(x,"whenCreated")), "passwordLastSet":date(scalar(x,"pwdLastSet")), "passwordExpires":date(scalar(x,"msDS-UserPasswordExpiryTimeComputed"))}
 
     def group(self, x):
         flags = number(x, "groupType") & 0xffffffff

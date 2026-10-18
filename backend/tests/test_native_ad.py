@@ -34,6 +34,26 @@ def test_real_mock_ldap_reads_and_escaped_search(directory):
     from ldap3.operation.search import parse_filter
     parse_filter(captured[0],None,True,False,None,False)
 
+def test_contact_numbers_preserve_distinct_ad_attributes(directory):
+    contacts = {"mobile":["+1 555 0100"], "otherMobile":["+1 555 0101", "+1 555 0102"],
+                "telephoneNumber":["1234"], "homePhone":["+1 555 0103"], "ipPhone":["5678"]}
+    directory.conn.modify(DN, {key:[(MODIFY_REPLACE, value)] for key,value in contacts.items()})
+    detail = directory.request('GET','/ad/users/tester')
+    for key,value in contacts.items():
+        assert detail[key] == (value if key == 'otherMobile' else value[0])
+    # A secondary mobile must still be returned when the primary field is absent.
+    directory.conn.modify(DN, {'mobile':[(MODIFY_REPLACE, [])]})
+    detail = directory.request('GET','/ad/users/tester')
+    assert detail['mobile'] == ''
+    assert detail['otherMobile'] == contacts['otherMobile']
+    directory.request('PATCH','/ad/users/tester', {'mobile':'+1 555 0104'})
+    assert directory.request('GET','/ad/users/tester')['otherMobile'] == contacts['otherMobile']
+
+def test_missing_contact_numbers_are_empty(directory):
+    detail = directory.request('GET','/ad/users/tester')
+    assert detail['otherMobile'] == []
+    assert all(detail[key] == '' for key in ('mobile','telephoneNumber','homePhone','ipPhone'))
+
 def test_disable_enable_preserves_other_uac_flags(directory):
     directory.request('POST','/ad/users/tester/disable')
     assert not directory.request('GET','/ad/users/tester')['enabled']
