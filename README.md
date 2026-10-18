@@ -10,7 +10,7 @@ The control plane and UI run on macOS/Linux. Direct mode connects to Active Dire
 
 The UI uses a self-contained retro systems-console design: dense information, monospace typography, hard borders, explicit state indicators, and keyboard-friendly administration flows. No CDN or external font is required.
 
-Module buttons keep their full labels and wrap into additional rows when the window narrows. File Transfer uses aligned local/remote panels, wrapping action bars, dark input controls and bounded tables. At smaller widths the file browsers stack vertically; long file names wrap within their cells. Scroll the central workspace to reach the queue and lower actions in a short window. The desktop layout supports windows at least 800 × 680 pixels; it is not a mobile interface.
+Module buttons keep their full labels and wrap into additional rows when the window narrows. Users has wrapping search/actions and pagination, a horizontally scrollable table, and a user inspector that moves below the list in windows up to 1500 pixels wide. Scroll the central workspace to reach user details and account actions in those windows. File Transfer uses aligned local/remote panels, wrapping action bars, dark input controls and bounded tables. At smaller widths the file browsers stack vertically; long file names wrap within their cells. Scroll the central workspace to reach the queue and lower actions in a short window. The desktop layout supports windows at least 800 × 680 pixels; it is not a mobile interface.
 
 Quick links: [macOS app](docs/MACOS_DEPLOYMENT.md) · [Direct AD/DNS/DHCP](docs/direct-mac.md) · [Windows worker](docs/WINDOWS_WORKER.md) · [SFTP guide](docs/FILE_TRANSFER.md) · [Coverage](docs/COVERAGE.md).
 
