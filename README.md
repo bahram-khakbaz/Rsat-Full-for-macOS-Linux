@@ -14,6 +14,8 @@ Module buttons keep their full labels and wrap into additional rows when the win
 
 User details show primary mobile (`mobile`), additional mobile numbers (`otherMobile`), office phone (`telephoneNumber`), home phone (`homePhone`) and IP phone (`ipPhone`) separately. All additional mobile values are retained. Editing Mobile only changes the primary `mobile` attribute; it does not replace numbers stored in other contact fields. Availability depends on the selected DC and the signed-in account's read permissions.
 
+For custom AD schemas, configure **Settings → Direct Mac → Mobile LDAP Attribute** with the attribute holding your mobile numbers (default: `mobile`). The General tab prefers that field and shows its configured attribute name, falling back to standard `mobile` when the custom value is absent. This is a display mapping only; **Edit Attributes → Mobile (Standard AD Attribute)** still edits standard `mobile`. The mapping is stored in the local settings database, not in source control. Only a single LDAP attribute name is accepted; wildcard selectors and attribute options are rejected.
+
 Quick links: [macOS app](docs/MACOS_DEPLOYMENT.md) · [Direct AD/DNS/DHCP](docs/direct-mac.md) · [Windows worker](docs/WINDOWS_WORKER.md) · [SFTP guide](docs/FILE_TRANSFER.md) · [Coverage](docs/COVERAGE.md).
 
 ## Choose a connection mode

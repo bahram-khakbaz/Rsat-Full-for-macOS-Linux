@@ -55,7 +55,7 @@ def configuration():
 
 def public_configuration(rows):
     cfg = json.loads(rows.get("native_config", "{}"))
-    return {**{k:cfg.get(k, "") for k in ("domain", "username", "preferred_dc", "ca_pem")}, **credential_metadata(rows.get("native_password", "")), "password_configured": bool(rows.get("native_password")), "capabilities": SUPPORTED, "trusted_dc_certificates": list(json.loads(rows.get("native_certificate_pins", "{}")))}
+    return {**{k:cfg.get(k, "") for k in ("domain", "username", "preferred_dc", "ca_pem", "mobile_attribute")}, **credential_metadata(rows.get("native_password", "")), "password_configured": bool(rows.get("native_password")), "capabilities": SUPPORTED, "trusted_dc_certificates": list(json.loads(rows.get("native_certificate_pins", "{}")))}
 
 def certificate_details(host, der):
     cert = x509.load_der_x509_certificate(der)
@@ -241,6 +241,12 @@ class Directory:
             raise HTTPException(404 if not rows else 409, "Object not found or identity is ambiguous; use its distinguished name.")
         return rows[0]
 
+    def user_attributes(self):
+        attribute = self.cfg.get("mobile_attribute") or "mobile"
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,63}", attribute):
+            raise HTTPException(422, "Invalid mobile attribute configuration")
+        return list(dict.fromkeys(USER_ATTRS + [attribute]))
+
     def user(self, x):
         uac, computed = number(x, "userAccountControl"), number(x, "msDS-User-Account-Control-Computed")
         mapping = {"samAccountName":"sAMAccountName", "displayName":"displayName", "givenName":"givenName", "surname":"sn", "mail":"mail", "department":"department", "title":"title", "company":"company", "manager":"manager", "mobile":"mobile", "employeeId":"employeeID", "office":"physicalDeliveryOfficeName"}
@@ -248,6 +254,9 @@ class Directory:
         # Keep additional numbers separate: editing mobile must never overwrite otherMobile.
         mapped = {k:scalar(x,v) for k,v in mapping.items()}
         mapped["otherMobile"] = values(x, "otherMobile")
+        attribute = self.cfg.get("mobile_attribute") or "mobile"
+        mapped["directoryMobile"] = scalar(x, attribute)
+        mapped["mobileAttribute"] = attribute
         return {**mapped, "dn":x["dn"], "ou":parent(x["dn"]), "enabled":not bool(uac & 2), "lockedOut":bool(computed & 16), "passwordExpired":bool(computed & 8388608), "passwordNeverExpires":bool(uac & 65536), "lastLogon":date(scalar(x,"lastLogonTimestamp")), "created":date(scalar(x,"whenCreated")), "passwordLastSet":date(scalar(x,"pwdLastSet")), "passwordExpires":date(scalar(x,"msDS-UserPasswordExpiryTimeComputed"))}
 
     def group(self, x):
@@ -285,7 +294,7 @@ class Directory:
                 cookie = base64.b64decode(claims["cookie"],validate=True)
             except (jwt.PyJWTError, ValueError, KeyError) as exc:
                 raise HTTPException(409,"This directory page expired or the search/connection changed. Refresh the user list.") from exc
-        self.conn.search(self.base,filter,search_scope=SUBTREE,attributes=USER_ATTRS,paged_size=page_size,paged_cookie=cookie,time_limit=15)
+        self.conn.search(self.base,filter,search_scope=SUBTREE,attributes=self.user_attributes(),paged_size=page_size,paged_cookie=cookie,time_limit=15)
         if (self.conn.result or {}).get("result") != 0:
             self.checked(False)
         rows = [{**x["attributes"],"dn":x["dn"]} for x in self.conn.response if x.get("type")=="searchResEntry"]
@@ -329,7 +338,7 @@ class Directory:
             f = "(&(objectCategory=person)(objectClass=user)" + (f"(|(sAMAccountName={q}*)(displayName={q}*)(mail={q}*))" if q else "") + ")"
             if params.get("page_size"):
                 return self.user_page(f,params.get("q", ""),int(params["page_size"]),params.get("cursor"))
-            return [self.user(x) for x in self.search(self.base,f,USER_ATTRS)]
+            return [self.user(x) for x in self.search(self.base,f,self.user_attributes())]
         if path == "/ad/groups" and method == "GET":
             return [self.group(x) for x in self.search(self.base,"(objectClass=group)",GROUP_ATTRS)]
         if path == "/ad/computers" and method == "GET":
@@ -343,7 +352,7 @@ class Directory:
         parts = [unquote(x) for x in path.strip("/").split("/")]
         if len(parts) >= 3 and parts[0] == "ad" and parts[1] in ("users","computers","groups"):
             kind = {"users":"user","computers":"computer","groups":"group"}[parts[1]]
-            obj = self.find(parts[2],kind, USER_ATTRS if kind == "user" else GROUP_ATTRS if kind == "group" else COMPUTER_ATTRS)
+            obj = self.find(parts[2],kind, self.user_attributes() if kind == "user" else GROUP_ATTRS if kind == "group" else COMPUTER_ATTRS)
             dn = obj["dn"]
             action = parts[3] if len(parts) >= 4 else ""
             if kind == "user" and method == "GET" and not action:

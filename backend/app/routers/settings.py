@@ -358,12 +358,16 @@ class NativeBody(BaseModel):
     domain: str = Field(min_length=3, max_length=253)
     username: str = Field(min_length=3, max_length=256)
     preferred_dc: str = Field(default="", max_length=253)
+    mobile_attribute: str = Field(default="mobile", max_length=64)
     password: str | None = Field(default=None, max_length=1024)
     vault_key: str | None = Field(default=None, max_length=80)
     ca_pem: str = Field(default="", max_length=65536)
 
 
 def validate_native(body: NativeBody):
+    mobile_attribute = body.mobile_attribute.strip() or "mobile"
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,63}", mobile_attribute):
+        raise HTTPException(422, "Use one LDAP attribute name for the mobile field")
     domain = body.domain.strip().lower()
     host = body.preferred_dc.strip().lower()
     hostname = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -377,7 +381,7 @@ def validate_native(body: NativeBody):
             ssl.create_default_context(cadata=body.ca_pem.strip())
         except (ssl.SSLError, ValueError) as exc:
             raise HTTPException(422, "The AD CA certificate must be a valid PEM certificate or certificate chain") from exc
-    return {"domain": domain, "username": username, "preferred_dc": host, "ca_pem": body.ca_pem.strip()}
+    return {"domain": domain, "username": username, "preferred_dc": host, "ca_pem": body.ca_pem.strip(), "mobile_attribute": mobile_attribute}
 
 @router.put("/native")
 def save_native(body: NativeBody, principal: Principal = Depends(require("settings.write")), db: Session = Depends(get_db)):

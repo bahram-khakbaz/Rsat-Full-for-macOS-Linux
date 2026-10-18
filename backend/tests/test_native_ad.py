@@ -54,6 +54,25 @@ def test_missing_contact_numbers_are_empty(directory):
     assert detail['otherMobile'] == []
     assert all(detail[key] == '' for key in ('mobile','telephoneNumber','homePhone','ipPhone'))
 
+def test_custom_mobile_mapping_is_used_in_details_and_user_search(directory):
+    directory.cfg['mobile_attribute'] = 'extensionAttribute1'
+    directory.conn.modify(DN, {'extensionAttribute1':[(MODIFY_REPLACE,['+1 555 0199'])],
+                               'mobile':[(MODIFY_REPLACE,['+1 555 0100'])]})
+    detail = directory.request('GET','/ad/users/tester')
+    assert detail['directoryMobile'] == '+1 555 0199'
+    assert detail['mobileAttribute'] == 'extensionAttribute1'
+    assert detail['mobile'] == '+1 555 0100'
+    assert directory.request('GET','/ad/users')[0]['directoryMobile'] == '+1 555 0199'
+    assert directory.request('GET','/ad/users',params={'page_size':15})['items'][0]['directoryMobile'] == '+1 555 0199'
+    directory.request('PATCH','/ad/users/tester', {'mobile':'+1 555 0104'})
+    assert directory.request('GET','/ad/users/tester')['directoryMobile'] == '+1 555 0199'
+
+def test_mobile_mapping_rejects_ldap_attribute_selectors():
+    for attribute in ('*', '+', 'mobile,mail', 'mobile;binary', 'mobile)(mail=*'):
+        with pytest.raises(HTTPException):
+            validate_native(NativeBody(domain='example.com',username='test@example.com',mobile_attribute=attribute))
+    assert validate_native(NativeBody(domain='example.com',username='test@example.com',mobile_attribute='extensionAttribute1'))['mobile_attribute'] == 'extensionAttribute1'
+
 def test_disable_enable_preserves_other_uac_flags(directory):
     directory.request('POST','/ad/users/tester/disable')
     assert not directory.request('GET','/ad/users/tester')['enabled']
