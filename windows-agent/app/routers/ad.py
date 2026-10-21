@@ -1,7 +1,7 @@
 import re
 from fastapi import APIRouter, Query
 from ..common import identity, list_result
-from ..models import GroupCreate, MemberBody, MoveBody, OUCreate, OUDelete, PasswordBody, RestoreBody, UserCreate, UserPatch
+from ..models import GroupCreate, MemberBody, MoveBody, OUCreate, OUDelete, PasswordBody, RestoreBody, UserCreate, UserPatch, AccountOptions
 from ..runner import run_ps
 
 router = APIRouter(prefix="/ad", tags=["active-directory"])
@@ -47,8 +47,40 @@ Get-ADUser -Identity $env:RSAT_SAM_ACCOUNT_NAME -Properties DisplayName,Mail,Ena
 @router.get("/users/{user_identity}")
 def get_user(user_identity: str):
     return run_ps(r"""Import-Module ActiveDirectory
-Get-ADUser -Identity $env:RSAT_ID -Properties * | Select-Object @{n='samAccountName';e={$_.SamAccountName}},@{n='displayName';e={$_.DisplayName}},@{n='givenName';e={$_.GivenName}},@{n='surname';e={$_.Surname}},@{n='mail';e={$_.Mail}},@{n='mobile';e={$_.MobilePhone}},@{n='otherMobile';e={@($_.otherMobile)}},@{n='telephoneNumber';e={$_.OfficePhone}},@{n='homePhone';e={$_.HomePhone}},@{n='ipPhone';e={$_.ipPhone}},@{n='department';e={$_.Department}},@{n='company';e={$_.Company}},@{n='title';e={$_.Title}},@{n='manager';e={$_.Manager}},@{n='employeeId';e={$_.EmployeeID}},@{n='office';e={$_.Office}},@{n='enabled';e={$_.Enabled}},@{n='lockedOut';e={$_.LockedOut}},@{n='passwordExpired';e={$_.PasswordExpired}},@{n='passwordNeverExpires';e={$_.PasswordNeverExpires}},@{n='passwordLastSet';e={$_.PasswordLastSet}},@{n='passwordExpires';e={if($_.'msDS-UserPasswordExpiryTimeComputed' -and [int64]$_.'msDS-UserPasswordExpiryTimeComputed' -gt 0){[datetime]::FromFileTime([int64]$_.'msDS-UserPasswordExpiryTimeComputed')}else{$null}}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='created';e={$_.whenCreated}},@{n='dn';e={$_.DistinguishedName}} | ConvertTo-Json -Depth 5 -Compress
+Get-ADUser -Identity $env:RSAT_ID -Properties * | Select-Object @{n='samAccountName';e={$_.SamAccountName}},@{n='displayName';e={$_.DisplayName}},@{n='givenName';e={$_.GivenName}},@{n='surname';e={$_.Surname}},@{n='mail';e={$_.Mail}},@{n='mobile';e={$_.MobilePhone}},@{n='otherMobile';e={@($_.otherMobile)}},@{n='telephoneNumber';e={$_.OfficePhone}},@{n='homePhone';e={$_.HomePhone}},@{n='ipPhone';e={$_.ipPhone}},@{n='department';e={$_.Department}},@{n='company';e={$_.Company}},@{n='title';e={$_.Title}},@{n='manager';e={$_.Manager}},@{n='employeeId';e={$_.EmployeeID}},@{n='office';e={$_.Office}},@{n='enabled';e={$_.Enabled}},@{n='lockedOut';e={$_.LockedOut}},@{n='passwordExpired';e={$_.PasswordExpired}},@{n='passwordNeverExpires';e={$_.PasswordNeverExpires}},@{n='passwordLastSet';e={$_.PasswordLastSet}},@{n='passwordExpires';e={if($_.'msDS-UserPasswordExpiryTimeComputed' -and [int64]$_.'msDS-UserPasswordExpiryTimeComputed' -gt 0){[datetime]::FromFileTime([int64]$_.'msDS-UserPasswordExpiryTimeComputed')}else{$null}}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='created';e={$_.whenCreated}},@{n='modified';e={if($_.whenChanged){$_.whenChanged.ToUniversalTime().ToString('o')}else{$null}}},@{n='accountExpires';e={if($_.AccountExpirationDate){$_.AccountExpirationDate.ToUniversalTime().ToString('o')}else{$null}}},@{n='accountNeverExpires';e={-not [bool]$_.AccountExpirationDate}},@{n='changePasswordAtLogon';e={[int64]$_.pwdLastSet -eq 0}},@{n='smartcardRequired';e={$_.SmartcardLogonRequired}},@{n='sensitiveNotDelegated';e={$_.AccountNotDelegated}},@{n='logonWorkstations';e={$_.LogonWorkstations}},@{n='dn';e={$_.DistinguishedName}} | ConvertTo-Json -Depth 5 -Compress
 """, {"id":identity(user_identity)})
+
+@router.patch("/users/{user_identity}/account-options")
+def account_options(user_identity: str, body: AccountOptions):
+    payload=body.model_dump(exclude_none=True, mode="json")
+    payload["id"]=identity(user_identity)
+    return run_ps(r"""Import-Module ActiveDirectory
+$id=$env:RSAT_ID
+$user=Get-ADUser $id -Properties PasswordNeverExpires,pwdLastSet
+$p=@{}
+$never=$user.PasswordNeverExpires
+$must=([int64]$user.pwdLastSet -eq 0)
+if(Test-Path Env:RSAT_PASSWORD_NEVER_EXPIRES){$never=[bool]::Parse($env:RSAT_PASSWORD_NEVER_EXPIRES);$p.PasswordNeverExpires=$never}
+if(Test-Path Env:RSAT_CHANGE_PASSWORD_AT_LOGON){$must=[bool]::Parse($env:RSAT_CHANGE_PASSWORD_AT_LOGON)}
+if($never -and $must){throw 'Clear change password at next logon before enabling password never expires'}
+if(Test-Path Env:RSAT_CHANGE_PASSWORD_AT_LOGON){
+ if($must -ne ([int64]$user.pwdLastSet -eq 0)){$p.ChangePasswordAtLogon=$must}
+}
+if(Test-Path Env:RSAT_SMARTCARD_REQUIRED){$p.SmartcardLogonRequired=[bool]::Parse($env:RSAT_SMARTCARD_REQUIRED)}
+if(Test-Path Env:RSAT_SENSITIVE_NOT_DELEGATED){$p.AccountNotDelegated=[bool]::Parse($env:RSAT_SENSITIVE_NOT_DELEGATED)}
+if(Test-Path Env:RSAT_ACCOUNT_EXPIRES){
+ $date=[DateTimeOffset]::Parse($env:RSAT_ACCOUNT_EXPIRES,[Globalization.CultureInfo]::InvariantCulture)
+ $p.AccountExpirationDate=$date.UtcDateTime
+}
+if(Test-Path Env:RSAT_LOGON_WORKSTATIONS){
+ if($env:RSAT_LOGON_WORKSTATIONS){$p.LogonWorkstations=$env:RSAT_LOGON_WORKSTATIONS}else{$p.Clear='userWorkstations'}
+}
+if(Test-Path Env:RSAT_ACCOUNT_NEVER_EXPIRES){
+ if([bool]::Parse($env:RSAT_ACCOUNT_NEVER_EXPIRES)){$p.AccountExpirationDate=$null}
+}
+if($p.Count){Set-ADUser -Identity $id @p}
+@{ok=$true}|ConvertTo-Json -Compress
+""",payload)
 
 @router.patch("/users/{user_identity}")
 def update_user(user_identity: str, body: UserPatch):

@@ -18,6 +18,14 @@ For custom AD schemas, configure **Settings → Direct Mac → Mobile LDAP Attri
 
 Quick links: [macOS app](docs/MACOS_DEPLOYMENT.md) · [Direct AD/DNS/DHCP](docs/direct-mac.md) · [Windows worker](docs/WINDOWS_WORKER.md) · [SFTP guide](docs/FILE_TRANSFER.md) · [Coverage](docs/COVERAGE.md).
 
+### User account options
+
+Select a user, then **Actions → Account Options** to edit password-never-expires, change-password-at-next-logon, account expiration (or never expires), smart-card requirement, account-sensitive/not-delegated and allowed logon workstations. The Account tab shows those states, password timestamps and account expiry. General and Account show the last modification timestamp (`whenChanged`); direct mode also identifies the DC that supplied it. This timestamp is local to the queried DC, not a replicated audit trail or the identity of the administrator who changed the user. See [Microsoft's whenChanged reference](https://learn.microsoft.com/en-us/windows/win32/adschema/a-whenchanged).
+
+Account expiration accepts a local date/time and saves the corresponding UTC instant; **Account Never Expires** clears the expiration. Password expiration is computed by AD policy, not an independently editable date. Password-never-expires and change-at-next-logon cannot both be enabled. Unrelated UAC bits are preserved, and saving unchanged next-logon settings does not reset password age. Changes require `ad.update` in the panel and delegated AD rights; successful operations are audited.
+
+This is a subset of ADUC properties, not complete ADUC parity. Password-change ACLs (User Cannot Change Password), logon-hour scheduling, delegation grants, security descriptors, certificates, RDS/COM+ properties and arbitrary attribute editing are not implemented by this dialog. Existing enable/disable, unlock, reset password, move, delete and group workflows remain separate. Windows worker changes require installing the updated worker; an actual Windows/domain write acceptance test is still required in your own environment.
+
 ## Choose a connection mode
 
 | Area | Direct Mac/Linux | Optional Windows worker |

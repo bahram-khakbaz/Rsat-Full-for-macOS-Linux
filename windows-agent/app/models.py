@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, StrictBool, model_validator, BaseModel, Field
 
 class PasswordBody(BaseModel):
     new_password: str = Field(min_length=8, max_length=256)
@@ -28,6 +28,30 @@ class UserPatch(BaseModel):
     company: str | None = None
     manager: str | None = None
     mobile: str | None = None
+
+class AccountOptions(BaseModel):
+    model_config = {"extra": "forbid"}
+    password_never_expires: StrictBool | None = None
+    change_password_at_logon: StrictBool | None = None
+    smartcard_required: StrictBool | None = None
+    sensitive_not_delegated: StrictBool | None = None
+    account_never_expires: StrictBool | None = None
+    account_expires: AwareDatetime | None = None
+    logon_workstations: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.password_never_expires and self.change_password_at_logon:
+            raise ValueError("Password never expires conflicts with change password at next logon")
+        if self.account_never_expires and self.account_expires:
+            raise ValueError("Choose account never expires OR an expiration date")
+        if self.account_never_expires is False and self.account_expires is None:
+            raise ValueError("An expiration date with a timezone is required")
+        if self.logon_workstations is not None:
+            import re
+            if self.logon_workstations and not re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", self.logon_workstations):
+                raise ValueError("Use comma-separated workstation names")
+        return self
 
 class MoveBody(BaseModel):
     target_ou: str

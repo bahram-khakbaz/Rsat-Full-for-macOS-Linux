@@ -1,6 +1,6 @@
 from typing import Literal
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, StrictBool, model_validator, BaseModel, Field
 from sqlalchemy.orm import Session
 from ..auth import Principal, require
 from ..db import get_db
@@ -36,6 +36,30 @@ class UserPatch(BaseModel):
     company: str | None = None
     manager: str | None = None
     mobile: str | None = None
+
+class AccountOptions(BaseModel):
+    model_config = {"extra": "forbid"}
+    password_never_expires: StrictBool | None = None
+    change_password_at_logon: StrictBool | None = None
+    smartcard_required: StrictBool | None = None
+    sensitive_not_delegated: StrictBool | None = None
+    account_never_expires: StrictBool | None = None
+    account_expires: AwareDatetime | None = None
+    logon_workstations: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.password_never_expires and self.change_password_at_logon:
+            raise ValueError("Password never expires conflicts with change password at next logon")
+        if self.account_never_expires and self.account_expires:
+            raise ValueError("Choose account never expires OR an expiration date")
+        if self.account_never_expires is False and self.account_expires is None:
+            raise ValueError("An expiration date with a timezone is required")
+        if self.logon_workstations is not None:
+            import re
+            if self.logon_workstations and not re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", self.logon_workstations):
+                raise ValueError("Use comma-separated workstation names")
+        return self
 
 class MoveBody(BaseModel):
     target_ou: str = Field(min_length=3, max_length=1024)
@@ -76,6 +100,13 @@ async def create_user(body: UserCreate, principal: Principal = Depends(require("
 @router.get("/users/{identity}")
 async def user(identity: str, _: Principal = Depends(require("ad.read"))):
     return await worker.request("GET", f"/ad/users/{identity}")
+
+@router.patch("/users/{identity}/account-options")
+async def account_options(identity: str, body: AccountOptions, principal: Principal = Depends(require("ad.update")), db: Session = Depends(get_db)):
+    payload = body.model_dump(exclude_none=True, mode="json")
+    result = await worker.request("PATCH", f"/ad/users/{identity}/account-options", payload=payload)
+    write_audit(db, principal, "ad.user.account_options", identity, details=payload)
+    return result
 
 @router.patch("/users/{identity}")
 async def update_user(identity: str, body: UserPatch, principal: Principal = Depends(require("ad.update")), db: Session = Depends(get_db)):

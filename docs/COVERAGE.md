@@ -22,12 +22,16 @@ Implemented:
 - User list/search/detail/create/update/delete
 - Unlock / enable / disable
 - Password reset
+- Account options: password never expires, password change at next logon, account expiry / never expires, smart-card requirement, sensitive/not-delegated and logon workstations (direct mode and updated worker)
+- Last-modified timestamp (`whenChanged`), with queried DC identity in direct mode
 - Move user between OUs
 - User group memberships
 - Group list/create/delete
 - Group members add/remove
 - Computer list/search/enable/disable/reset/move/delete
 - OU list/create/delete
+
+These account options do not provide complete ADUC property parity. Password-change ACLs, logon-hour scheduling, delegation grants, security descriptors, certificates and RDS/COM+ settings are not implemented by the account-options dialog. Password expiration dates are computed by AD policy; only account expiration is directly editable. See [User account options](../README.md#user-account-options) for validation and test limitations.
 
 ## DNS
 

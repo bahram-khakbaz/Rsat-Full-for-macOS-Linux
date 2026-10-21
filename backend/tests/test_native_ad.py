@@ -79,6 +79,65 @@ def test_disable_enable_preserves_other_uac_flags(directory):
     directory.request('POST','/ad/users/tester/enable')
     assert directory.find('tester','user',['userAccountControl'])['userAccountControl']==['66048']
 
+def test_user_last_modified_and_account_expiry_metadata(directory):
+    directory.conn.modify(DN, {'whenChanged':[(MODIFY_REPLACE,['20261021102030.0Z'])],
+                               'accountExpires':[(MODIFY_REPLACE,[9223372036854775807])]})
+    user=directory.request('GET','/ad/users/tester')
+    assert user['modified']=='2026-10-21T10:20:30+00:00'
+    assert user['sourceDC']=='dc.example.com'
+    assert user['accountNeverExpires'] and user['accountExpires'] is None
+
+def test_account_options_preserve_other_flags_and_do_not_refresh_password_age(directory):
+    directory.conn.modify(DN, {'pwdLastSet':[(MODIFY_REPLACE,[133000000000000000])]})
+    directory.request('PATCH','/ad/users/tester/account-options',{'password_never_expires':False,'smartcard_required':True,'sensitive_not_delegated':True,'change_password_at_logon':False})
+    row=directory.find('tester','user',['userAccountControl','pwdLastSet'])
+    assert n.number(row,'userAccountControl')==512|262144|1048576
+    assert n.number(row,'pwdLastSet')==133000000000000000
+
+def test_account_expiration_timezone_conversion_and_clear(directory):
+    directory.request('PATCH','/ad/users/tester/account-options',{'account_never_expires':False,'account_expires':'2030-05-01T12:00:00+03:30','logon_workstations':'PC01,PC02'})
+    detail=directory.request('GET','/ad/users/tester')
+    assert detail['accountExpires']=='2030-05-01T08:30:00+00:00'
+    assert not detail['accountNeverExpires'] and detail['logonWorkstations']=='PC01,PC02'
+    directory.request('PATCH','/ad/users/tester/account-options',{'account_never_expires':True,'logon_workstations':''})
+    detail=directory.request('GET','/ad/users/tester')
+    assert detail['accountNeverExpires'] and not detail['logonWorkstations']
+
+def test_existing_never_expire_conflict_rejects_all_changes(directory):
+    directory.conn.modify=Mock()
+    with pytest.raises(HTTPException):
+        directory.request('PATCH','/ad/users/tester/account-options',{'change_password_at_logon':True,'account_never_expires':True})
+    directory.conn.modify.assert_not_called()
+
+def test_changing_password_at_logon_without_reset(directory):
+    directory.request('PATCH','/ad/users/tester/account-options',{'password_never_expires':False,'change_password_at_logon':True})
+    assert directory.request('GET','/ad/users/tester')['changePasswordAtLogon']
+    directory.request('PATCH','/ad/users/tester/account-options',{'change_password_at_logon':False})
+    assert n.number(directory.find('tester','user',['pwdLastSet']),'pwdLastSet')==-1
+
+def test_invalid_account_options_are_rejected_before_writes(directory):
+    from app.routers.ad import AccountOptions
+    from pydantic import ValidationError
+    for body in ({'account_expires':'2030-05-01T12:00:00'}, {'password_never_expires':True,'change_password_at_logon':True}, {'account_never_expires':False}, {'logon_workstations':'PC01;anything'}, {'enabled':True}, {'password_never_expires':'yes'}):
+        with pytest.raises(ValidationError):AccountOptions(**body)
+
+def test_account_options_access_and_audit(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.auth import issue_token
+    from app.routers import ad
+    from unittest.mock import AsyncMock
+    request=AsyncMock(return_value={'ok':True});audit=Mock()
+    monkeypatch.setattr(ad.worker,'request',request)
+    monkeypatch.setattr(ad,'write_audit',audit)
+    client=TestClient(app)
+    assert client.patch('/api/ad/users/tester/account-options',json={'account_never_expires':True},headers={'Authorization':'Bearer '+issue_token('reader','auditor')}).status_code==403
+    request.assert_not_called()
+    response=client.patch('/api/ad/users/tester/account-options',json={'account_never_expires':True},headers={'Authorization':'Bearer '+issue_token('operator','admin')})
+    assert response.status_code==200
+    request.assert_awaited_once_with('PATCH','/ad/users/tester/account-options',payload={'account_never_expires':True})
+    assert audit.call_args.args[2]=='ad.user.account_options'
+
 def test_password_reset_uses_admin_reset_and_sets_next_logon_once(directory):
     directory.conn.extend.microsoft.modify_password=Mock(return_value=True)
     directory.conn.modify=Mock(return_value=True)

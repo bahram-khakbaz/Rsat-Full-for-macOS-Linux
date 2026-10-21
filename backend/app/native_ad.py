@@ -129,7 +129,7 @@ def parent(dn):
     parts = parse_dn(dn)
     return "".join(a + "=" + b + sep for a, b, sep in parts[1:])
 
-USER_ATTRS = ["sAMAccountName", "displayName", "givenName", "sn", "mail", "department", "title", "company", "manager", "mobile", "otherMobile", "telephoneNumber", "homePhone", "ipPhone", "employeeID", "physicalDeliveryOfficeName", "userAccountControl", "msDS-User-Account-Control-Computed", "lastLogonTimestamp", "whenCreated", "pwdLastSet", "msDS-UserPasswordExpiryTimeComputed"]
+USER_ATTRS = ["sAMAccountName", "displayName", "givenName", "sn", "mail", "department", "title", "company", "manager", "mobile", "otherMobile", "telephoneNumber", "homePhone", "ipPhone", "employeeID", "physicalDeliveryOfficeName", "userAccountControl", "msDS-User-Account-Control-Computed", "lastLogonTimestamp", "whenCreated", "whenChanged", "accountExpires", "userWorkstations", "pwdLastSet", "msDS-UserPasswordExpiryTimeComputed"]
 COMPUTER_ATTRS = ["name", "sAMAccountName", "operatingSystem", "dNSHostName", "userAccountControl", "lastLogonTimestamp"]
 GROUP_ATTRS = ["name", "sAMAccountName", "description", "groupType"]
 
@@ -257,7 +257,7 @@ class Directory:
         attribute = self.cfg.get("mobile_attribute") or "mobile"
         mapped["directoryMobile"] = scalar(x, attribute)
         mapped["mobileAttribute"] = attribute
-        return {**mapped, "dn":x["dn"], "ou":parent(x["dn"]), "enabled":not bool(uac & 2), "lockedOut":bool(computed & 16), "passwordExpired":bool(computed & 8388608), "passwordNeverExpires":bool(uac & 65536), "lastLogon":date(scalar(x,"lastLogonTimestamp")), "created":date(scalar(x,"whenCreated")), "passwordLastSet":date(scalar(x,"pwdLastSet")), "passwordExpires":date(scalar(x,"msDS-UserPasswordExpiryTimeComputed"))}
+        return {**mapped, "dn":x["dn"], "ou":parent(x["dn"]), "enabled":not bool(uac & 2), "lockedOut":bool(computed & 16), "passwordExpired":bool(computed & 8388608), "passwordNeverExpires":bool(uac & 65536), "lastLogon":date(scalar(x,"lastLogonTimestamp")), "created":date(scalar(x,"whenCreated")), "modified":date(scalar(x,"whenChanged")), "sourceDC":self.host, "accountExpires":date(scalar(x,"accountExpires")), "accountNeverExpires":number(x,"accountExpires") in (0,9223372036854775807), "changePasswordAtLogon":number(x,"pwdLastSet",-1)==0, "smartcardRequired":bool(uac & 262144), "sensitiveNotDelegated":bool(uac & 1048576), "logonWorkstations":scalar(x,"userWorkstations"), "passwordLastSet":date(scalar(x,"pwdLastSet")), "passwordExpires":date(scalar(x,"msDS-UserPasswordExpiryTimeComputed"))}
 
     def group(self, x):
         flags = number(x, "groupType") & 0xffffffff
@@ -367,6 +367,40 @@ class Directory:
                 return self.checked(self.conn.modify(dn,{"member":[(MODIFY_ADD if method == "POST" else MODIFY_DELETE,[entry["dn"]])]}))
             if method == "DELETE" and not action:
                 return self.checked(self.conn.delete(dn))
+            if method == "PATCH" and action == "account-options" and kind == "user":
+                from .routers.ad import AccountOptions
+                from pydantic import ValidationError
+                try:
+                    payload = AccountOptions(**payload).model_dump(exclude_none=True, mode="json")
+                except ValidationError as exc:
+                    raise HTTPException(422, "Invalid or conflicting account options") from exc
+                flags = number(obj, "userAccountControl")
+                for key, mask in (("password_never_expires",65536), ("smartcard_required",262144), ("sensitive_not_delegated",1048576)):
+                    if key in payload:
+                        flags = flags | mask if payload[key] else flags & ~mask
+                must_change = payload.get("change_password_at_logon", number(obj,"pwdLastSet",-1)==0)
+                if flags & 65536 and must_change:
+                    raise HTTPException(422, "Clear change password at next logon before enabling password never expires")
+                changes = {}
+                if flags != number(obj, "userAccountControl"):
+                    changes["userAccountControl"] = [(MODIFY_REPLACE,[flags])]
+                if "change_password_at_logon" in payload:
+                    # Only touch pwdLastSet when the requested state actually changes.
+                    if payload["change_password_at_logon"] != (number(obj,"pwdLastSet",-1)==0):
+                        changes["pwdLastSet"] = [(MODIFY_REPLACE,[0 if payload["change_password_at_logon"] else -1])]
+                if payload.get("account_never_expires"):
+                    changes["accountExpires"] = [(MODIFY_REPLACE,[0])]
+                elif payload.get("account_expires"):
+                    expiry = datetime.fromisoformat(payload["account_expires"].replace("Z","+00:00"))
+                    delta = expiry.astimezone(timezone.utc) - datetime(1601,1,1,tzinfo=timezone.utc)
+                    ticks = (delta.days*86400+delta.seconds)*10000000+delta.microseconds*10
+                    if ticks <= 0 or ticks >= 9223372036854775807:
+                        raise HTTPException(422,"Account expiry is outside the AD date range")
+                    changes["accountExpires"] = [(MODIFY_REPLACE,[ticks])]
+                if "logon_workstations" in payload:
+                    names = payload["logon_workstations"]
+                    changes["userWorkstations"] = [(MODIFY_REPLACE,[names] if names else [])]
+                return self.checked(self.conn.modify(dn,changes)) if changes else {"ok":True}
             if method == "PATCH" and kind == "user" and not action:
                 keys = {"display_name":"displayName","email":"mail","department":"department","title":"title","company":"company","manager":"manager","mobile":"mobile"}
                 changes = {}
