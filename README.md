@@ -8,6 +8,8 @@ The control plane and UI run on macOS/Linux. Direct mode connects to Active Dire
 
 ## Interface
 
+SSH supports multiple concurrent sessions across **Linux Servers** and **SSH Switches**, including multiple connections to the same host. Each Connect opens an independent terminal tab. Use **SSH Sessions (N)** in the module bar to return to all open terminals. Switching modules, tabs or SFTP does not disconnect SSH; closing a session tab or clicking its Disconnect closes only that connection. Sessions and scrollback are kept in memory while RSAT remains open. Reloading or quitting RSAT closes all connections; active sessions trigger a browser leave-page warning where supported. Host-key verification, per-operator credentials and existing SSH permissions still apply.
+
 The UI uses a self-contained retro systems-console design: dense information, monospace typography, hard borders, explicit state indicators, and keyboard-friendly administration flows. No CDN or external font is required.
 
 Module buttons keep their full labels and wrap into additional rows when the window narrows. Users has wrapping search/actions and pagination, a horizontally scrollable table, and a user inspector that moves below the list in windows up to 1500 pixels wide. Scroll the central workspace to reach user details and account actions in those windows. File Transfer uses aligned local/remote panels, wrapping action bars, dark input controls and bounded tables. At smaller widths the file browsers stack vertically; long file names wrap within their cells. Scroll the central workspace to reach the queue and lower actions in a short window. The desktop layout supports windows at least 800 × 680 pixels; it is not a mobile interface.

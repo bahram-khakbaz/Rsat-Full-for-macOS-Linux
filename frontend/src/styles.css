@@ -448,6 +448,17 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .ssh-page .table-shell{max-height:35vh;overflow:auto}
 .ssh-page .table-shell thead{position:sticky;top:0;z-index:1}
+.ssh-session-workspace{min-width:0;margin-top:8px}
+.ssh-session-workspace[hidden],.ssh-session-pane[hidden]{display:none!important}
+.ssh-session-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px;background:#03191a;border:1px solid var(--line)}
+.ssh-session-tab{min-width:0;max-width:100%;display:flex;border:1px solid var(--line-soft)}
+.ssh-session-tab.active{border-color:var(--cyan);background:#103233}
+.ssh-session-tab>button{display:flex;align-items:center;gap:6px;min-width:0;padding:8px;border:0;background:transparent;color:var(--text);font-size:10px}
+.ssh-session-tab>button[role=tab]{flex-wrap:wrap}
+.ssh-session-tab span{overflow-wrap:anywhere}
+.ssh-session-tab small{font-size:8px;color:var(--muted)}
+.ssh-session-tab .ssh-session-close{flex-shrink:0;border-left:1px solid var(--line-soft);font-size:18px}
+.ssh-session-pane{min-width:0}
 .file-connect{display:flex;gap:10px;align-items:end;padding:12px;flex-wrap:wrap}
 .file-connect label{flex:1;min-width:240px;display:grid;gap:5px}
 .file-connect select{min-height:32px;width:100%}
