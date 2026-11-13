@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import issue_token
-from app.db import Base, AuditLog, get_db
+from app.db import AuditLog, Base, get_db
 from app.main import app
 
 URL = "/api/ipam/vlans"
@@ -17,12 +17,16 @@ def headers(user="operator", role="network"):
 
 @pytest.fixture
 def inventory():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
+
     def db():
         with factory() as session:
             yield session
+
     app.dependency_overrides[get_db] = db
     with TestClient(app) as client:
         yield client, factory
@@ -31,21 +35,28 @@ def inventory():
 
 
 def create(client, **changes):
-    response = client.post(URL, headers=headers(), json={
-        "name": "Synthetic VLAN", "cidr": "192.0.2.0/28", **changes})
+    response = client.post(
+        URL, headers=headers(), json={"name": "Synthetic VLAN", "cidr": "192.0.2.0/28", **changes}
+    )
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def patch(client, vlan, ip, status, **changes):
-    return client.patch(f'{URL}/{vlan["id"]}/addresses/{ip}', headers=headers(), json={
-        "status": status, "revision": vlan["revision"], **changes})
+    return client.patch(
+        f"{URL}/{vlan['id']}/addresses/{ip}",
+        headers=headers(),
+        json={"status": status, "revision": vlan["revision"], **changes},
+    )
 
 
 def test_counts_boundaries_and_persisted_status(inventory):
     client, factory = inventory
-    vlan = create(client, default_status="free", states={
-        "192.0.2.1": "reserved", "192.0.2.2": "used", "192.0.2.3": "unknown"})
+    vlan = create(
+        client,
+        default_status="free",
+        states={"192.0.2.1": "reserved", "192.0.2.2": "used", "192.0.2.3": "unknown"},
+    )
     assert vlan["total"] == 14
     assert vlan["counts"] == {"free": 11, "used": 1, "reserved": 1, "unknown": 1}
     assert [a["ip"] for a in vlan["addresses"]] == [f"192.0.2.{i}" for i in range(1, 15)]
@@ -72,31 +83,88 @@ def test_owner_isolation_and_roles(inventory):
     client, _ = inventory
     assert client.get(URL).status_code == 401
     assert client.get(URL, headers=headers(role="read_only")).status_code == 403
-    assert client.post(URL, headers=headers(role="helpdesk"), json={"name":"test","cidr":"192.0.2.0/28"}).status_code == 403
+    assert (
+        client.post(
+            URL, headers=headers(role="helpdesk"), json={"name": "test", "cidr": "192.0.2.0/28"}
+        ).status_code
+        == 403
+    )
     vlan = create(client)
     assert client.get(URL, headers=headers("another-operator")).json() == []
-    assert client.patch(f'{URL}/{vlan["id"]}/addresses/192.0.2.2', headers=headers("another-operator"),
-                        json={"status":"used","revision":1}).status_code == 404
+    assert (
+        client.patch(
+            f"{URL}/{vlan['id']}/addresses/192.0.2.2",
+            headers=headers("another-operator"),
+            json={"status": "used", "revision": 1},
+        ).status_code
+        == 404
+    )
 
 
 def test_cidr_normalization_overlap_and_invalid_inputs(inventory):
     client, _ = inventory
     vlan = create(client, cidr="192.0.2.8/28")
     assert vlan["cidr"] == "192.0.2.0/28"
-    assert client.post(URL, headers=headers(), json={"name":"overlap","cidr":"192.0.2.0/29"}).status_code == 409
+    assert (
+        client.post(
+            URL, headers=headers(), json={"name": "overlap", "cidr": "192.0.2.0/29"}
+        ).status_code
+        == 409
+    )
     for cidr in ["bad", "::/64", "0.0.0.0/0", "192.0.2.0/31", "192.0.2.1/32"]:
-        assert client.post(URL, headers=headers(), json={"name":"invalid","cidr":cidr}).status_code == 422
+        assert (
+            client.post(URL, headers=headers(), json={"name": "invalid", "cidr": cidr}).status_code
+            == 422
+        )
     for ip in ["192.0.2.0", "192.0.2.15", "192.0.2.99", "bad"]:
         assert patch(client, vlan, ip, "used").status_code == 422
     assert patch(client, vlan, "192.0.2.2", "invalid").status_code == 422
-    assert client.post(URL, headers=headers(), json={"name":"bad state","cidr":"198.51.100.0/28", "states":{"198.51.100.15":"free"}}).status_code == 422
+    assert (
+        client.post(
+            URL,
+            headers=headers(),
+            json={
+                "name": "bad state",
+                "cidr": "198.51.100.0/28",
+                "states": {"198.51.100.15": "free"},
+            },
+        ).status_code
+        == 422
+    )
 
 
 def test_full_subnet_and_two_free_addresses(inventory):
     client, _ = inventory
     full = create(client, default_status="used")
     assert full["counts"]["free"] == 0 and full["counts"]["used"] == 14
-    partial = create(client, cidr="198.51.100.0/27", default_status="used",
-                     states={"198.51.100.14":"free", "198.51.100.15":"free"})
+    partial = create(
+        client,
+        cidr="198.51.100.0/27",
+        default_status="used",
+        states={"198.51.100.14": "free", "198.51.100.15": "free"},
+    )
     assert partial["total"] == 30
     assert partial["counts"]["free"] == 2 and partial["counts"]["used"] == 28
+
+
+def test_rename_default_status_and_delete(inventory):
+    client, factory = inventory
+    vlan = create(client)
+    url = f"{URL}/{vlan['id']}"
+    body = {"name": "Renamed VLAN", "default_status": "free", "revision": vlan["revision"]}
+    changed = client.put(url, headers=headers(), json=body)
+    assert changed.status_code == 200, changed.text
+    changed = changed.json()
+    assert changed["name"] == "Renamed VLAN" and changed["revision"] == vlan["revision"] + 1
+    assert changed["counts"]["free"] == changed["total"]
+    # A second window still holding the old revision cannot overwrite the change.
+    assert client.put(url, headers=headers(), json=body).status_code == 409
+    assert client.put(url, headers=headers(), json={**body, "name": "  "}).status_code == 422
+    assert client.put(url, headers=headers("another-operator"), json=body).status_code == 404
+    assert client.delete(url, headers=headers(role="auditor")).status_code == 403
+    assert client.delete(url, headers=headers("another-operator")).status_code == 404
+    assert client.delete(url, headers=headers()).json() == {"ok": True}
+    assert client.get(URL, headers=headers()).json() == []
+    with factory() as session:
+        actions = [row.action for row in session.query(AuditLog).order_by(AuditLog.id)]
+    assert actions[-2:] == ["ipam.vlan.update", "ipam.vlan.delete"]
