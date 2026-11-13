@@ -1,7 +1,7 @@
 import importlib.util
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 source = Path(__file__).resolve().parents[1] / "unattended-worker.py"
 spec = importlib.util.spec_from_file_location("unattended_worker", source)

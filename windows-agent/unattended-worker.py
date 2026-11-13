@@ -1,9 +1,10 @@
 """Worker entrypoint for an administrator-provisioned gMSA startup task."""
+
 import argparse
 import os
-from pathlib import Path
 import secrets
 import tempfile
+from pathlib import Path
 
 
 def write_pairing_file(directory):
@@ -25,17 +26,21 @@ def main():
     parser.add_argument("--state-directory", required=True)
     args = parser.parse_args()
     os.chdir(Path(__file__).resolve().parent)
-    # Import config only after chdir so the protected deployment .env is used.
+    # Import only after chdir so the protected deployment .env is used.
     from app.config import settings
-    if settings.agent_token in ("", "change-me", "__AUTO_GENERATED__") or len(settings.agent_token) < 32:
+    from app.launcher import serve
+
+    if not settings.token_initialized:
         raise RuntimeError("Initialize the worker's channel credential before unattended startup")
     code, target = write_pairing_file(args.state_directory)
-    settings.pairing_code = code
-    settings.pairing_code_file = str(target)
     try:
-        import uvicorn
-        from app.main import app
-        uvicorn.run(app, host=settings.listen_host, port=settings.listen_port)
+        # The pairing code is never printed here; it is read from the protected file.
+        serve(
+            pairing_code=code,
+            pairing_code_file=str(target),
+            state_directory=Path(args.state_directory),
+            show_pairing_code=False,
+        )
     finally:
         target.unlink(missing_ok=True)
 

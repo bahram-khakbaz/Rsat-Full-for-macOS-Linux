@@ -1,28 +1,106 @@
-import re
-from fastapi import APIRouter, Query
-from ..common import identity, list_result
-from ..models import GroupCreate, MemberBody, MoveBody, OUCreate, OUDelete, PasswordBody, RestoreBody, UserCreate, UserPatch, AccountOptions
-from ..runner import run_ps
+import base64
+import binascii
+import json
+
+from fastapi import APIRouter, HTTPException, Query
+
+from ..common import capped, identity, prefix_filter, search_term
+from ..config import settings
+from ..models import (
+    AccountOptions,
+    GroupCreate,
+    MemberBody,
+    MoveBody,
+    OUCreate,
+    OUDelete,
+    PasswordBody,
+    RestoreBody,
+    UserCreate,
+    UserPatch,
+)
+from ..runner import run_ps, run_ps_list
 
 router = APIRouter(prefix="/ad", tags=["active-directory"])
 
+MAX_PAGE_SIZE = 100
+_USER_BASE = "(&(objectCategory=person)(objectClass=user))"
+_USER_SEARCH = ("sAMAccountName", "displayName", "mail")
+_GROUP_SEARCH = ("name", "sAMAccountName")
+_COMPUTER_SEARCH = ("name", "dNSHostName")
+
+# The filter is built and escaped in Python; PowerShell only passes it on.
+# RSAT_LIMIT bounds the server read, RSAT_SKIP drops the pages already shown.
+USER_LIST = r"""Import-Module ActiveDirectory
+Get-ADUser -LDAPFilter $env:RSAT_FILTER -ResultSetSize ([int]$env:RSAT_LIMIT) -Properties DisplayName,Mail,Department,Title,Company,Enabled,LockedOut,DistinguishedName,LastLogonDate | Select-Object -Skip ([int]$env:RSAT_SKIP) | Select-Object @{n='samAccountName';e={$_.SamAccountName}},@{n='displayName';e={$_.DisplayName}},@{n='mail';e={$_.Mail}},@{n='department';e={$_.Department}},@{n='title';e={$_.Title}},@{n='company';e={$_.Company}},@{n='enabled';e={$_.Enabled}},@{n='lockedOut';e={$_.LockedOut}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='dn';e={$_.DistinguishedName}},@{n='ou';e={$_.DistinguishedName -replace '^CN=[^,]+,',''}} | ConvertTo-Json -Depth 5 -Compress
+"""
+
+
+def _page_size(value: str) -> int | None:
+    """The control plane sends an empty value when it wants the unpaged list."""
+    if not value.strip():
+        return None
+    try:
+        size = int(value)
+    except ValueError:
+        size = 0
+    if not 1 <= size <= MAX_PAGE_SIZE:
+        raise HTTPException(status_code=422, detail=f"page_size must be 1 to {MAX_PAGE_SIZE}")
+    return size
+
+
+def _encode_cursor(offset: int, query: str) -> str:
+    raw = json.dumps({"o": offset, "q": query}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_cursor(cursor: str, query: str) -> int:
+    expired = HTTPException(
+        status_code=409,
+        detail="This directory page expired or the search changed. Refresh the user list.",
+    )
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+        offset = claims["o"]
+        cursor_query = claims["q"]
+    except (binascii.Error, ValueError, KeyError, TypeError):
+        raise expired from None
+    if type(offset) is not int or not 0 <= offset <= 10_000_000 or cursor_query != query:
+        raise expired
+    return offset
+
+
 @router.get("/users")
-def users(q: str = Query(default="", max_length=80)):
-    q = re.sub(r"[^A-Za-z0-9_.@ -]", "", q)
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
-$q=$env:RSAT_Q
-if ([string]::IsNullOrWhiteSpace($q)) {
-  $rows=Get-ADUser -Filter * -ResultSetSize 500 -Properties DisplayName,Mail,Department,Title,Company,Enabled,LockedOut,DistinguishedName,LastLogonDate
-} else {
-  $f="SamAccountName -like '*$q*' -or DisplayName -like '*$q*' -or Mail -like '*$q*'"
-  $rows=Get-ADUser -Filter $f -ResultSetSize 500 -Properties DisplayName,Mail,Department,Title,Company,Enabled,LockedOut,DistinguishedName,LastLogonDate
-}
-$rows | Select-Object @{n='samAccountName';e={$_.SamAccountName}},@{n='displayName';e={$_.DisplayName}},@{n='mail';e={$_.Mail}},@{n='department';e={$_.Department}},@{n='title';e={$_.Title}},@{n='company';e={$_.Company}},@{n='enabled';e={$_.Enabled}},@{n='lockedOut';e={$_.LockedOut}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='ou';e={$_.DistinguishedName -replace '^CN=[^,]+,',''}} | ConvertTo-Json -Depth 5 -Compress
-""", {"q": q}))
+def users(
+    q: str = Query(default="", max_length=80),
+    page_size: str = Query(default="", max_length=8),
+    cursor: str = Query(default="", max_length=4096),
+):
+    term = search_term(q)
+    ldap_filter = prefix_filter(_USER_BASE, _USER_SEARCH, term)
+    size = _page_size(page_size)
+    if size is None:
+        limit = settings.max_unpaged_results
+        rows = run_ps_list(USER_LIST, {"filter": ldap_filter, "limit": limit + 1, "skip": 0})
+        return capped(rows, limit, "users")
+    # Active Directory returns a stable order for an unchanged filter, so the
+    # cursor is an offset into it. One extra row tells whether a next page exists.
+    offset = _decode_cursor(cursor, term) if cursor else 0
+    rows = run_ps_list(
+        USER_LIST, {"filter": ldap_filter, "limit": offset + size + 1, "skip": offset}
+    )
+    has_more = len(rows) > size
+    return {
+        "items": rows[:size],
+        "next_cursor": _encode_cursor(offset + size, term) if has_more else None,
+        "has_more": has_more,
+        "total": None,
+    }
+
 
 @router.post("/users")
 def create_user(body: UserCreate):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $secure=ConvertTo-SecureString $env:RSAT_PASSWORD -AsPlainText -Force
 $p=@{
  Name=$env:RSAT_DISPLAY_NAME
@@ -30,10 +108,10 @@ $p=@{
  GivenName=$env:RSAT_GIVEN_NAME
  Surname=$env:RSAT_SURNAME
  DisplayName=$env:RSAT_DISPLAY_NAME
- Path=$env:RSAT_OU
  AccountPassword=$secure
  Enabled=[System.Convert]::ToBoolean($env:RSAT_ENABLED)
 }
+if($env:RSAT_OU){$p.Path=$env:RSAT_OU}
 if($env:RSAT_EMAIL){$p.EmailAddress=$env:RSAT_EMAIL}
 if($env:RSAT_DEPARTMENT){$p.Department=$env:RSAT_DEPARTMENT}
 if($env:RSAT_TITLE){$p.Title=$env:RSAT_TITLE}
@@ -42,19 +120,27 @@ New-ADUser @p
 if($env:RSAT_MANAGER){Set-ADUser -Identity $env:RSAT_SAM_ACCOUNT_NAME -Manager $env:RSAT_MANAGER}
 Set-ADUser -Identity $env:RSAT_SAM_ACCOUNT_NAME -ChangePasswordAtLogon ([System.Convert]::ToBoolean($env:RSAT_MUST_CHANGE))
 Get-ADUser -Identity $env:RSAT_SAM_ACCOUNT_NAME -Properties DisplayName,Mail,Enabled | Select-Object SamAccountName,DisplayName,Mail,Enabled | ConvertTo-Json -Compress
-""", body.model_dump())
+""",
+        body.model_dump(),
+    )
+
 
 @router.get("/users/{user_identity}")
 def get_user(user_identity: str):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 Get-ADUser -Identity $env:RSAT_ID -Properties * | Select-Object @{n='samAccountName';e={$_.SamAccountName}},@{n='displayName';e={$_.DisplayName}},@{n='givenName';e={$_.GivenName}},@{n='surname';e={$_.Surname}},@{n='mail';e={$_.Mail}},@{n='mobile';e={$_.MobilePhone}},@{n='otherMobile';e={@($_.otherMobile)}},@{n='telephoneNumber';e={$_.OfficePhone}},@{n='homePhone';e={$_.HomePhone}},@{n='ipPhone';e={$_.ipPhone}},@{n='department';e={$_.Department}},@{n='company';e={$_.Company}},@{n='title';e={$_.Title}},@{n='manager';e={$_.Manager}},@{n='employeeId';e={$_.EmployeeID}},@{n='office';e={$_.Office}},@{n='enabled';e={$_.Enabled}},@{n='lockedOut';e={$_.LockedOut}},@{n='passwordExpired';e={$_.PasswordExpired}},@{n='passwordNeverExpires';e={$_.PasswordNeverExpires}},@{n='passwordLastSet';e={$_.PasswordLastSet}},@{n='passwordExpires';e={if($_.'msDS-UserPasswordExpiryTimeComputed' -and [int64]$_.'msDS-UserPasswordExpiryTimeComputed' -gt 0){[datetime]::FromFileTime([int64]$_.'msDS-UserPasswordExpiryTimeComputed')}else{$null}}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='created';e={$_.whenCreated}},@{n='modified';e={if($_.whenChanged){$_.whenChanged.ToUniversalTime().ToString('o')}else{$null}}},@{n='accountExpires';e={if($_.AccountExpirationDate){$_.AccountExpirationDate.ToUniversalTime().ToString('o')}else{$null}}},@{n='accountNeverExpires';e={-not [bool]$_.AccountExpirationDate}},@{n='changePasswordAtLogon';e={[int64]$_.pwdLastSet -eq 0}},@{n='smartcardRequired';e={$_.SmartcardLogonRequired}},@{n='sensitiveNotDelegated';e={$_.AccountNotDelegated}},@{n='logonWorkstations';e={$_.LogonWorkstations}},@{n='dn';e={$_.DistinguishedName}} | ConvertTo-Json -Depth 5 -Compress
-""", {"id":identity(user_identity)})
+""",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.patch("/users/{user_identity}/account-options")
 def account_options(user_identity: str, body: AccountOptions):
-    payload=body.model_dump(exclude_none=True, mode="json")
-    payload["id"]=identity(user_identity)
-    return run_ps(r"""Import-Module ActiveDirectory
+    payload = body.model_dump(exclude_none=True, mode="json")
+    payload["id"] = identity(user_identity)
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $id=$env:RSAT_ID
 $user=Get-ADUser $id -Properties PasswordNeverExpires,pwdLastSet
 $p=@{}
@@ -80,13 +166,17 @@ if(Test-Path Env:RSAT_ACCOUNT_NEVER_EXPIRES){
 }
 if($p.Count){Set-ADUser -Identity $id @p}
 @{ok=$true}|ConvertTo-Json -Compress
-""",payload)
+""",
+        payload,
+    )
+
 
 @router.patch("/users/{user_identity}")
 def update_user(user_identity: str, body: UserPatch):
-    values=body.model_dump(exclude_none=True)
-    values["id"]=identity(user_identity)
-    return run_ps(r"""Import-Module ActiveDirectory
+    values = body.model_dump(exclude_none=True)
+    values["id"] = identity(user_identity)
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $id=$env:RSAT_ID
 if(Test-Path Env:RSAT_DISPLAY_NAME){ if($env:RSAT_DISPLAY_NAME){Set-ADUser $id -DisplayName $env:RSAT_DISPLAY_NAME}else{Set-ADUser $id -Clear displayName} }
 if(Test-Path Env:RSAT_EMAIL){ if($env:RSAT_EMAIL){Set-ADUser $id -EmailAddress $env:RSAT_EMAIL}else{Set-ADUser $id -Clear mail} }
@@ -96,146 +186,258 @@ if(Test-Path Env:RSAT_COMPANY){ if($env:RSAT_COMPANY){Set-ADUser $id -Company $e
 if(Test-Path Env:RSAT_MOBILE){ if($env:RSAT_MOBILE){Set-ADUser $id -MobilePhone $env:RSAT_MOBILE}else{Set-ADUser $id -Clear mobile} }
 if(Test-Path Env:RSAT_MANAGER){ if($env:RSAT_MANAGER){Set-ADUser $id -Manager $env:RSAT_MANAGER}else{Set-ADUser $id -Clear manager} }
 @{ok=$true}|ConvertTo-Json -Compress
-""", values)
+""",
+        values,
+    )
+
 
 @router.delete("/users/{user_identity}")
 def delete_user(user_identity: str):
-    return run_ps("Import-Module ActiveDirectory; Remove-ADUser -Identity $env:RSAT_ID -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress", {"id":identity(user_identity)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Remove-ADUser -Identity $env:RSAT_ID -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.post("/users/{user_identity}/unlock")
 def unlock(user_identity: str):
-    return run_ps("Import-Module ActiveDirectory; Unlock-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress", {"id":identity(user_identity)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Unlock-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.post("/users/{user_identity}/enable")
 def enable_user(user_identity: str):
-    return run_ps("Import-Module ActiveDirectory; Enable-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress", {"id":identity(user_identity)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Enable-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.post("/users/{user_identity}/disable")
 def disable_user(user_identity: str):
-    return run_ps("Import-Module ActiveDirectory; Disable-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress", {"id":identity(user_identity)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Disable-ADAccount -Identity $env:RSAT_ID; @{ok=$true}|ConvertTo-Json -Compress",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.post("/users/{user_identity}/reset-password")
 def reset_password(user_identity: str, body: PasswordBody):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $secure=ConvertTo-SecureString $env:RSAT_PASSWORD -AsPlainText -Force
 Set-ADAccountPassword -Identity $env:RSAT_ID -Reset -NewPassword $secure
 Set-ADUser -Identity $env:RSAT_ID -ChangePasswordAtLogon ([System.Convert]::ToBoolean($env:RSAT_MUST_CHANGE))
 @{ok=$true}|ConvertTo-Json -Compress
-""", {"id":identity(user_identity),"password":body.new_password,"must_change":str(body.must_change)})
+""",
+        {
+            "id": identity(user_identity),
+            "password": body.new_password,
+            "must_change": str(body.must_change),
+        },
+    )
+
 
 @router.post("/users/{user_identity}/move")
 def move_user(user_identity: str, body: MoveBody):
-    return run_ps("Import-Module ActiveDirectory; Get-ADUser -Identity $env:RSAT_ID | Move-ADObject -TargetPath $env:RSAT_TARGET_OU; @{ok=$true}|ConvertTo-Json -Compress", {"id":identity(user_identity),"target_ou":body.target_ou})
+    return run_ps(
+        "Import-Module ActiveDirectory; Get-ADUser -Identity $env:RSAT_ID | Move-ADObject -TargetPath $env:RSAT_TARGET_OU; @{ok=$true}|ConvertTo-Json -Compress",
+        {"id": identity(user_identity), "target_ou": body.target_ou},
+    )
+
 
 @router.get("/users/{user_identity}/groups")
 def user_groups(user_identity: str):
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
+    return run_ps_list(
+        r"""Import-Module ActiveDirectory
 Get-ADPrincipalGroupMembership -Identity $env:RSAT_ID | Select-Object @{n='name';e={$_.Name}},@{n='scope';e={[string]$_.GroupScope}},@{n='dn';e={$_.DistinguishedName}} | ConvertTo-Json -Depth 4 -Compress
-""", {"id":identity(user_identity)}))
+""",
+        {"id": identity(user_identity)},
+    )
+
 
 @router.get("/groups")
-def groups():
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
-Get-ADGroup -Filter * -ResultSetSize 1000 -Properties Description,GroupScope,GroupCategory | ForEach-Object {
-  $count=(Get-ADGroupMember -Identity $_ -ErrorAction SilentlyContinue | Measure-Object).Count
-  [pscustomobject]@{name=$_.Name;description=$_.Description;scope=[string]$_.GroupScope;category=[string]$_.GroupCategory;members=$count;dn=$_.DistinguishedName}
+def groups(q: str = Query(default="", max_length=80)):
+    limit = settings.max_unpaged_results
+    # The direct member count comes from the group's own attribute: one query
+    # for the whole inventory instead of one membership lookup per group.
+    rows = run_ps_list(
+        r"""Import-Module ActiveDirectory
+Get-ADGroup -LDAPFilter $env:RSAT_FILTER -ResultSetSize ([int]$env:RSAT_LIMIT) -Properties Description,GroupScope,GroupCategory,member | ForEach-Object {
+  [pscustomobject]@{name=$_.Name;description=$_.Description;scope=[string]$_.GroupScope;category=[string]$_.GroupCategory;members=@($_.member).Count;dn=$_.DistinguishedName}
 } | ConvertTo-Json -Depth 4 -Compress
-"""))
+""",
+        {
+            "filter": prefix_filter("(objectCategory=group)", _GROUP_SEARCH, q),
+            "limit": limit + 1,
+        },
+    )
+    return capped(rows, limit, "groups")
+
 
 @router.post("/groups")
 def create_group(body: GroupCreate):
-    return run_ps(r"""Import-Module ActiveDirectory
-New-ADGroup -Name $env:RSAT_NAME -GroupScope $env:RSAT_SCOPE -GroupCategory $env:RSAT_CATEGORY -Path $env:RSAT_PATH -Description $env:RSAT_DESCRIPTION
-Get-ADGroup -Identity $env:RSAT_NAME | Select-Object Name,DistinguishedName | ConvertTo-Json -Compress
-""", body.model_dump())
+    return run_ps(
+        r"""Import-Module ActiveDirectory
+$p=@{Name=$env:RSAT_NAME;GroupScope=$env:RSAT_SCOPE;GroupCategory=$env:RSAT_CATEGORY}
+if($env:RSAT_PATH){$p.Path=$env:RSAT_PATH}
+if($env:RSAT_DESCRIPTION){$p.Description=$env:RSAT_DESCRIPTION}
+New-ADGroup @p -PassThru | Select-Object Name,DistinguishedName | ConvertTo-Json -Compress
+""",
+        body.model_dump(),
+    )
+
 
 @router.delete("/groups/{name}")
 def delete_group(name: str):
-    return run_ps("Import-Module ActiveDirectory; Remove-ADGroup -Identity $env:RSAT_NAME -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Remove-ADGroup -Identity $env:RSAT_NAME -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name)},
+    )
+
 
 @router.get("/groups/{name}/members")
 def group_members(name: str):
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
+    return run_ps_list(
+        r"""Import-Module ActiveDirectory
 Get-ADGroupMember -Identity $env:RSAT_NAME | Select-Object @{n='name';e={$_.Name}},@{n='samAccountName';e={$_.SamAccountName}},@{n='objectClass';e={$_.objectClass}},@{n='dn';e={$_.DistinguishedName}} | ConvertTo-Json -Depth 4 -Compress
-""", {"name":identity(name)}))
+""",
+        {"name": identity(name)},
+    )
+
 
 @router.post("/groups/{name}/members")
 def add_group_member(name: str, body: MemberBody):
-    return run_ps("Import-Module ActiveDirectory; Add-ADGroupMember -Identity $env:RSAT_NAME -Members $env:RSAT_MEMBER; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name),"member":body.member})
+    return run_ps(
+        "Import-Module ActiveDirectory; Add-ADGroupMember -Identity $env:RSAT_NAME -Members $env:RSAT_MEMBER; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name), "member": body.member},
+    )
+
 
 @router.delete("/groups/{name}/members/{member}")
 def remove_group_member(name: str, member: str):
-    return run_ps("Import-Module ActiveDirectory; Remove-ADGroupMember -Identity $env:RSAT_NAME -Members $env:RSAT_MEMBER -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name),"member":identity(member)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Remove-ADGroupMember -Identity $env:RSAT_NAME -Members $env:RSAT_MEMBER -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name), "member": identity(member)},
+    )
+
 
 @router.get("/computers")
 def computers(q: str = Query(default="", max_length=80)):
-    q = re.sub(r"[^A-Za-z0-9_. -]", "", q)
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
-$q=$env:RSAT_Q
-if($q){$rows=Get-ADComputer -Filter "Name -like '*$q*'" -ResultSetSize 1000 -Properties OperatingSystem,Enabled,LastLogonDate,IPv4Address,DistinguishedName}
-else{$rows=Get-ADComputer -Filter * -ResultSetSize 1000 -Properties OperatingSystem,Enabled,LastLogonDate,IPv4Address,DistinguishedName}
-$rows | Select-Object @{n='name';e={$_.Name}},@{n='os';e={$_.OperatingSystem}},@{n='enabled';e={$_.Enabled}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='ipv4';e={$_.IPv4Address}},@{n='ou';e={$_.DistinguishedName -replace '^CN=[^,]+,',''}} | ConvertTo-Json -Depth 4 -Compress
-""",{"q":q}))
+    limit = settings.max_unpaged_results
+    rows = run_ps_list(
+        r"""Import-Module ActiveDirectory
+Get-ADComputer -LDAPFilter $env:RSAT_FILTER -ResultSetSize ([int]$env:RSAT_LIMIT) -Properties OperatingSystem,Enabled,LastLogonDate,IPv4Address,DistinguishedName | Select-Object @{n='name';e={$_.Name}},@{n='os';e={$_.OperatingSystem}},@{n='enabled';e={$_.Enabled}},@{n='lastLogon';e={$_.LastLogonDate}},@{n='ipv4';e={$_.IPv4Address}},@{n='dn';e={$_.DistinguishedName}},@{n='ou';e={$_.DistinguishedName -replace '^CN=[^,]+,',''}} | ConvertTo-Json -Depth 4 -Compress
+""",
+        {
+            # Substring match, like the direct connector's computer search.
+            "filter": prefix_filter(
+                "(objectCategory=computer)", _COMPUTER_SEARCH, q, contains=True
+            ),
+            "limit": limit + 1,
+        },
+    )
+    return capped(rows, limit, "computers")
+
 
 @router.post("/computers/{name}/enable")
 def computer_enable(name: str):
-    return run_ps("Import-Module ActiveDirectory; Enable-ADAccount -Identity $env:RSAT_NAME; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Get-ADComputer -Identity $env:RSAT_NAME | Enable-ADAccount; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name)},
+    )
+
 
 @router.post("/computers/{name}/disable")
 def computer_disable(name: str):
-    return run_ps("Import-Module ActiveDirectory; Disable-ADAccount -Identity $env:RSAT_NAME; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Get-ADComputer -Identity $env:RSAT_NAME | Disable-ADAccount; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name)},
+    )
+
 
 @router.post("/computers/{name}/reset")
 def computer_reset(name: str):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $alphabet='abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*'
-$plain=-join (1..40 | ForEach-Object {$alphabet[(Get-Random -Maximum $alphabet.Length)]})
+$rng=New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+$bytes=New-Object byte[] 40
+try{$rng.GetBytes($bytes)}finally{$rng.Dispose()}
+$plain=-join ($bytes | ForEach-Object {$alphabet[$_ % $alphabet.Length]})
 $secure=ConvertTo-SecureString $plain -AsPlainText -Force
 Set-ADAccountPassword -Identity (Get-ADComputer -Identity $env:RSAT_NAME) -Reset -NewPassword $secure
 @{ok=$true;warning='Computer account password reset. Repair secure channel or rejoin if the client is no longer synchronized.'}|ConvertTo-Json -Compress
-""", {"name":identity(name)})
+""",
+        {"name": identity(name)},
+    )
+
 
 @router.post("/computers/{name}/move")
 def computer_move(name: str, body: MoveBody):
-    return run_ps("Import-Module ActiveDirectory; Get-ADComputer -Identity $env:RSAT_NAME | Move-ADObject -TargetPath $env:RSAT_TARGET_OU; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name),"target_ou":body.target_ou})
+    return run_ps(
+        "Import-Module ActiveDirectory; Get-ADComputer -Identity $env:RSAT_NAME | Move-ADObject -TargetPath $env:RSAT_TARGET_OU; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name), "target_ou": body.target_ou},
+    )
+
 
 @router.delete("/computers/{name}")
 def computer_delete(name: str):
-    return run_ps("Import-Module ActiveDirectory; Remove-ADComputer -Identity $env:RSAT_NAME -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress", {"name":identity(name)})
+    return run_ps(
+        "Import-Module ActiveDirectory; Remove-ADComputer -Identity $env:RSAT_NAME -Confirm:$false; @{ok=$true}|ConvertTo-Json -Compress",
+        {"name": identity(name)},
+    )
+
 
 @router.get("/ous")
 def ous():
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
+    return run_ps_list(r"""Import-Module ActiveDirectory
 Get-ADOrganizationalUnit -Filter * -Properties ProtectedFromAccidentalDeletion | Select-Object @{n='name';e={$_.Name}},@{n='dn';e={$_.DistinguishedName}},@{n='protected';e={$_.ProtectedFromAccidentalDeletion}} | Sort-Object dn | ConvertTo-Json -Depth 3 -Compress
-"""))
+""")
+
 
 @router.post("/ous")
 def create_ou(body: OUCreate):
-    return run_ps(r"""Import-Module ActiveDirectory
-$o=New-ADOrganizationalUnit -Name $env:RSAT_NAME -Path $env:RSAT_PATH -ProtectedFromAccidentalDeletion ([System.Convert]::ToBoolean($env:RSAT_PROTECTED)) -PassThru
-$o | Select-Object Name,DistinguishedName,ProtectedFromAccidentalDeletion | ConvertTo-Json -Compress
-""", body.model_dump())
+    return run_ps(
+        r"""Import-Module ActiveDirectory
+$p=@{Name=$env:RSAT_NAME;ProtectedFromAccidentalDeletion=[System.Convert]::ToBoolean($env:RSAT_PROTECTED)}
+if($env:RSAT_PATH){$p.Path=$env:RSAT_PATH}
+New-ADOrganizationalUnit @p -PassThru | Select-Object Name,DistinguishedName,ProtectedFromAccidentalDeletion | ConvertTo-Json -Compress
+""",
+        body.model_dump(),
+    )
+
 
 @router.post("/ous/delete")
 def delete_ou(body: OUDelete):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $o=Get-ADOrganizationalUnit -Identity $env:RSAT_DN
 if($o.ProtectedFromAccidentalDeletion){Set-ADOrganizationalUnit -Identity $o -ProtectedFromAccidentalDeletion $false}
 Remove-ADOrganizationalUnit -Identity $o -Recursive:([System.Convert]::ToBoolean($env:RSAT_RECURSIVE)) -Confirm:$false
 @{ok=$true}|ConvertTo-Json -Compress
-""", body.model_dump())
+""",
+        body.model_dump(),
+    )
+
 
 @router.get("/deleted")
 def deleted_objects():
-    return list_result(run_ps(r"""Import-Module ActiveDirectory
+    return run_ps_list(r"""Import-Module ActiveDirectory
 $base=(Get-ADDomain).DistinguishedName
 Get-ADObject -Filter 'isDeleted -eq $true -and Name -ne "Deleted Objects"' -IncludeDeletedObjects -SearchBase $base -Properties lastKnownParent,whenChanged,objectClass,ObjectGUID | Select-Object @{n='name';e={($_.Name -split '\0ADEL:')[0]}},@{n='objectClass';e={@($_.ObjectClass)[-1]}},@{n='lastKnownParent';e={$_.lastKnownParent}},@{n='deletedAt';e={$_.whenChanged}},@{n='objectGuid';e={$_.ObjectGUID.Guid}} | Sort-Object deletedAt -Descending | ConvertTo-Json -Depth 4 -Compress
-"""))
+""")
+
 
 @router.post("/deleted/restore")
 def restore_deleted_object(body: RestoreBody):
-    return run_ps(r"""Import-Module ActiveDirectory
+    return run_ps(
+        r"""Import-Module ActiveDirectory
 $o=Get-ADObject -Identity $env:RSAT_OBJECT_GUID -IncludeDeletedObjects
 if($env:RSAT_TARGET_PATH){Restore-ADObject -Identity $o -TargetPath $env:RSAT_TARGET_PATH}else{Restore-ADObject -Identity $o}
 @{ok=$true}|ConvertTo-Json -Compress
-""",body.model_dump())
+""",
+        body.model_dump(),
+    )
