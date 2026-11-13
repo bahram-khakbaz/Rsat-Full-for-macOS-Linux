@@ -72,6 +72,7 @@ cannot select another operator's directory.
 - Agent handles retrieval/renewal. RSAT trusts the authorized file producer and
   cannot independently prove that a timestamp reflects a successful Vault read.
 - Deliveries must be bounded, regular JSON files with owner-only permission bits.
+- The backend container runs as UID/GID 10001 by default and no longer as root, so it can only read `0600` deliveries it owns. Either run Vault Agent as UID 10001, or set `RSAT_BACKEND_UID` / `RSAT_BACKEND_GID` in `.env` to the UID/GID that owns the delivered files.
   Symlinks are rejected. This consumer requires the POSIX backend, normally Docker
   on Linux, rather than the Windows worker.
 - The password exists transiently in backend memory and in the protected delivery

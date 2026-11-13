@@ -17,14 +17,23 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    # Unprivileged by default. For Vault Agent deliveries, set this to the UID
+    # that owns the delivered files (see docs/VAULT_AGENT.md).
+    user: "${RSAT_BACKEND_UID:-10001}:${RSAT_BACKEND_GID:-10001}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
+      ENVIRONMENT: production
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       DEMO_MODE: ${DEMO_MODE:-true}
       WORKER_URL: ${WORKER_URL:-}
       WORKER_TOKEN: ${WORKER_TOKEN:-}
+      ALLOW_INSECURE_WORKER: ${ALLOW_INSECURE_WORKER:-false}
       CORS_ORIGINS: http://localhost:8080
     depends_on:
       db:
@@ -38,8 +47,10 @@ services:
   web:
     build: ./frontend
     restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8080:8080"
     depends_on:
       backend:
         condition: service_healthy
