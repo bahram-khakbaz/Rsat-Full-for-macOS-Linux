@@ -1,12 +1,14 @@
 """Read short-lived Vault Agent deliveries; no Vault token enters RSAT."""
-from datetime import datetime, timezone
+
 import hashlib
 import json
 import os
 import re
 import stat
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
+
 from .config import settings
 
 PREFIX = "vault-agent:v1:"
@@ -27,7 +29,7 @@ def reference(owner, key):
 
 def metadata(value):
     if value.startswith(PREFIX):
-        parts = value[len(PREFIX):].split(":")
+        parts = value[len(PREFIX) :].split(":")
         if len(parts) == 2 and re.fullmatch(r"[a-f0-9]{64}", parts[0]) and KEY.fullmatch(parts[1]):
             return {"credential_source": "vault-agent", "vault_key": parts[1]}
     return {"credential_source": "local", "vault_key": ""}
@@ -43,12 +45,14 @@ def read(value):
     try:
         if not settings.vault_credential_dir or not value.startswith(PREFIX):
             raise ValueError()
-        owner, key = value[len(PREFIX):].split(":")
+        owner, key = value[len(PREFIX) :].split(":")
         if not re.fullmatch(r"[a-f0-9]{64}", owner) or not KEY.fullmatch(key):
             raise ValueError()
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
-        root = os.open(settings.vault_credential_dir, flags); handles.append(root)
-        directory = os.open(owner, flags, dir_fd=root); handles.append(directory)
+        root = os.open(settings.vault_credential_dir, flags)
+        handles.append(root)
+        directory = os.open(owner, flags, dir_fd=root)
+        handles.append(directory)
         if any(os.fstat(handle).st_mode & 0o022 for handle in (root, directory)):
             raise ValueError()
         fd = os.open(key + ".json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
@@ -63,13 +67,20 @@ def read(value):
         delivered = datetime.fromisoformat(document["rendered_at"].replace("Z", "+00:00"))
         if delivered.tzinfo is None:
             raise ValueError()
-        age = (datetime.now(timezone.utc) - delivered).total_seconds()
+        age = (datetime.now(UTC) - delivered).total_seconds()
         password = document["password"]
-        if not -30 <= age <= settings.vault_max_age_seconds or not isinstance(password, str) or not 1 <= len(password) <= 4096:
+        if (
+            not -30 <= age <= settings.vault_max_age_seconds
+            or not isinstance(password, str)
+            or not 1 <= len(password) <= 4096
+        ):
             raise ValueError()
         return password
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        raise HTTPException(503, "Vault Agent credential delivery is missing, invalid or stale; no local fallback was used") from None
+        raise HTTPException(
+            503,
+            "Vault Agent credential delivery is missing, invalid or stale; no local fallback was used",
+        ) from None
     finally:
         for fd in reversed(handles):
             os.close(fd)

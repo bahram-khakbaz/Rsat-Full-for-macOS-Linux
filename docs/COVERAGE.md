@@ -39,8 +39,9 @@ Implemented:
 
 - Zone inventory
 - AD-integrated primary zone create/delete
-- A, AAAA, CNAME and PTR inventory
-- A, AAAA, CNAME and PTR create/delete
+- A, AAAA, CNAME, PTR, NS, MX, SRV and TXT inventory
+- Create, edit and delete for the same eight record types (direct mode and updated worker)
+- SOA and unknown record types are read-only
 
 ## DHCP
 
@@ -72,9 +73,11 @@ Implemented:
 - Windows RSAT worker
 - Docker Compose
 - Demo mode
-- RBAC
-- JWT sessions
-- PostgreSQL audit log
+- RBAC with panel operator accounts
+- Revocable cookie sessions with sign-in lockout
+- PostgreSQL audit log (success, failure and demo outcomes)
+- Manual VLAN / IPv4 allocation register (create, rename, delete, per-address status)
+- SSH terminals and SFTP file transfer
 - Allow-listed worker API
 - CI build/test workflow
 - Offline-safe UI assets
@@ -92,7 +95,7 @@ A single project called "RSAT" covers many independent Microsoft server products
 - File Services / FSRM
 - Storage Migration Service
 - Remote Desktop Services management
-- IPAM
+- Microsoft IPAM server integration (the built-in VLAN register is a manual inventory only)
 - Windows Server Backup
 - every third-party or role-specific MMC extension
 

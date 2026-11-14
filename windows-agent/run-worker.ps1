@@ -27,20 +27,11 @@ if ($envText -notmatch '(?m)^AGENT_TOKEN=(.+)$' -or $Matches[1].Trim() -in @('',
   Set-Content '.env' $envText -Encoding ASCII
 }
 
-$pairingCode = (New-RandomSecret 9).Substring(0,12).ToUpperInvariant()
-$env:PAIRING_CODE = $pairingCode
-
-Write-Host ''
-Write-Host '============================================================' -ForegroundColor DarkCyan
-Write-Host ' RSAT Full Windows Worker' -ForegroundColor Cyan
-Write-Host '============================================================' -ForegroundColor DarkCyan
-Write-Host " Pairing code: $pairingCode" -ForegroundColor Yellow
-Write-Host ' Pairing code expires after 15 minutes and can be used once.' -ForegroundColor DarkGray
-Write-Host " Run-as identity: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)" -ForegroundColor Gray
-Write-Host '============================================================' -ForegroundColor DarkCyan
-Write-Host ''
-
 if (-not (Test-Path '.venv')) { py -3 -m venv .venv }
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-& .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765
+
+# The launcher creates the one-time pairing code, prepares the TLS certificate,
+# prints the pairing code with the certificate fingerprint and starts the API.
+& .\.venv\Scripts\python.exe -m app.launcher
+exit $LASTEXITCODE

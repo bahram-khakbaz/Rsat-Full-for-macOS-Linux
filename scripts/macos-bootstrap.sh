@@ -13,7 +13,9 @@ if [ ! -f .env ]; then
   jwt_secret="$(openssl rand -hex 32)"
   admin_password="$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'Aa')"
   db_password="$(openssl rand -hex 24)"
+  encryption_key="$(openssl rand -hex 32)"
   sed -i.bak "s|replace-with-a-long-random-secret|$jwt_secret|" .env
+  sed -i.bak "s|replace-with-a-separate-random-encryption-key|$encryption_key|" .env
   sed -i.bak "s|replace-with-a-strong-password|$admin_password|" .env
   sed -i.bak "s|replace-with-a-long-random-db-password|$db_password|g" .env
   rm -f .env.bak

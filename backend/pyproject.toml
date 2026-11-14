@@ -1,0 +1,29 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["app/migrations/versions"]
+
+[tool.ruff.lint]
+# E/F: correctness, I: import order, UP: modern syntax, B: likely bugs,
+# S: security, SIM: simplifications, C4: comprehensions.
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "C4"]
+ignore = [
+    "E501",   # long user-facing messages and LDAP filters; the formatter wraps code
+    "B008",   # FastAPI dependencies are declared as argument defaults
+    "S101",   # assert is used by tests
+    "S603",   # subprocess calls use fixed argument lists (kinit, samba helper)
+    "S607",
+    "S110",   # best-effort cleanup of sockets/handles must never mask the real error
+    "SIM102", # nested conditions carry separate explanatory comments
+    "SIM105", # explicit try/except/pass reads clearer around cleanup code
+    "SIM108",
+    "SIM117",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E", "SIM", "C4", "UP", "F811"]
+"app/demo.py" = ["E"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

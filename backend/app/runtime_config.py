@@ -1,7 +1,11 @@
 from dataclasses import dataclass
+
 from .config import settings
 from .db import SessionLocal, SystemSetting
 from .secret_store import decrypt_secret
+
+RUNTIME_KEYS = ("demo_mode", "worker_url", "worker_token", "worker_certificate", "connection_mode")
+
 
 @dataclass
 class RuntimeConfig:
@@ -9,10 +13,15 @@ class RuntimeConfig:
     worker_url: str
     worker_token: str
     connection_mode: str = "worker"
+    worker_certificate: str = ""
+
 
 def get_runtime_config() -> RuntimeConfig:
     with SessionLocal() as db:
-        rows = {x.key: x.value for x in db.query(SystemSetting).all()}
+        rows = {
+            x.key: x.value
+            for x in db.query(SystemSetting).filter(SystemSetting.key.in_(RUNTIME_KEYS)).all()
+        }
     token_value = rows.get("worker_token")
     token = decrypt_secret(token_value) if token_value is not None else settings.worker_token
     return RuntimeConfig(
@@ -20,4 +29,5 @@ def get_runtime_config() -> RuntimeConfig:
         worker_url=rows.get("worker_url", settings.worker_url).rstrip("/"),
         worker_token=token,
         connection_mode=rows.get("connection_mode", "worker"),
+        worker_certificate=rows.get("worker_certificate", ""),
     )

@@ -107,7 +107,7 @@ Direct mode needs reachable company DNS/network, trusted LDAPS certificates and 
 ### Settings / multi-site topology
 
 - In-panel connection settings; no manual `.env` editing after initial bootstrap
-- Windows worker URL + one-time pairing code; no worker secret is typed or managed manually
+- Windows worker HTTPS URL, certificate fingerprint confirmation and one-time pairing code; no worker secret is typed or managed manually
 - The paired worker secret is generated automatically and stored encrypted by the control plane
 - Direct mode stores domain credentials encrypted in the local backend; the frontend never receives saved passwords
 - In worker mode, AD credentials stay on Windows
@@ -176,9 +176,10 @@ Real inventories remain in the local database, never in demo fixtures or GitHub.
 ### Platform
 
 - FastAPI control plane
-- PostgreSQL audit trail
-- Role-based authorization
-- Expiring JWT sessions
+- PostgreSQL audit trail that records successful, failed and demo-mode operations
+- Panel operators with roles (admin, helpdesk, network, GPO admin, auditor, read-only), managed under **Settings → Operators**
+- Sessions in an httpOnly, SameSite=Strict cookie; sign-in lockout, immediate revocation and "sign out everywhere"
+- Versioned database migrations applied at start-up
 - Dedicated Windows RSAT worker
 - No arbitrary PowerShell execution endpoint
 - Docker Compose deployment
@@ -227,7 +228,7 @@ For direct access, open **Settings**, choose Direct Mac Connection, enter your d
 
 Read [Direct Mac connection](docs/direct-mac.md) for permissions, protocol requirements and limitations, and [macOS deployment](docs/MACOS_DEPLOYMENT.md) to build the one-click app.
 
-For additional Windows RSAT/GPO features, start `windows-agent/run-worker.ps1` on a dedicated domain-joined management host, pair its URL and one-time code in Settings, and use a delegated service account or gMSA. See [Windows Worker](docs/WINDOWS_WORKER.md).
+For additional Windows RSAT/GPO features, start `windows-agent/run-worker.ps1` on a dedicated domain-joined management host, then in Settings enter its `https://` URL, inspect the certificate and compare its SHA-256 fingerprint with the one printed on the worker console, and pair with the one-time code. Use a delegated service account or gMSA. See [Windows Worker](docs/WINDOWS_WORKER.md).
 
 ## Security model
 
@@ -247,21 +248,24 @@ environment/database, never in source control. See the
 [publication checklist](docs/SECURITY.md#publication-hygiene) before sharing a
 fork, release, screenshot or diagnostic export.
 
-- No domain credential is stored in the frontend.
+- No domain credential and no session token is stored in the frontend; the session cookie is not readable by scripts.
 - The control plane never exposes a generic PowerShell endpoint.
+- Worker traffic requires HTTPS. The worker's certificate fingerprint is confirmed at pairing and pinned; plain HTTP is refused unless `ALLOW_INSECURE_WORKER=true` is set deliberately.
 - Worker calls are protected by an internal high-entropy credential created automatically on Windows.
 - The operator never manages that credential directly; a one-time pairing code exchanges it with the control plane.
 - Pairing codes expire after 15 minutes and are single-use.
-- Direct-mode credentials are encrypted locally and never returned to the web UI. Keep JWT_SECRET stable and protect the environment file and database backups.
+- Direct-mode credentials are encrypted locally and never returned to the web UI. New installations use a dedicated `ENCRYPTION_KEY`; see [key management](docs/SECURITY.md#credential-encryption-keys) before changing it or `JWT_SECRET`. Protect the environment file and database backups.
+- Production start-up is refused while `JWT_SECRET`, `ADMIN_PASSWORD` or `ENCRYPTION_KEY` still hold example values.
+- Containers run as unprivileged users with all capabilities dropped; the web tier sends a Content-Security-Policy and related hardening headers.
 - LDAPS trust is verified before binding; RPC requires Kerberos and packet privacy; SSH verifies approved host keys before sending passwords.
 - The Windows worker uses the security token of its own domain account (preferably a delegated service account/gMSA).
 - Command values are supplied through process environment variables rather than interpolated into PowerShell source.
 - Control-plane permissions separate helpdesk, network, GPO, audit and administrator capabilities.
-- Write operations are audited.
+- Write operations are audited, including rejected and failed attempts and failed sign-ins.
 - Password values are redacted from audit data.
 - The default macOS deployment binds the UI to localhost only.
 
-For shared production deployments, add organizational OIDC/SSO, TLS and firewall restrictions. Delegate only the directory/service rights needed by the chosen mode.
+For shared production deployments, put TLS in front of the panel, add organizational OIDC/SSO and MFA (not implemented), and restrict access with a firewall. Delegate only the directory/service rights needed by the chosen mode. All panel operators act through the one saved directory account (direct mode) or the worker identity, so the panel audit log — not the DC security log — identifies who performed a change.
 
 ## Scope boundary
 
@@ -293,12 +297,14 @@ CI independently tests Python and builds the frontend on every push.
 For the individual checks used by CI:
 
 ```bash
-pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt
+ruff check backend && ruff format --check backend
 PYTHONPATH=backend pytest -q backend/tests
 python3 macos/tests/test_launcher.py
 cd frontend
 npm ci --no-audit --no-fund
-node --test src/api-errors.test.mjs src/file-transfer.test.mjs src/dns-browser.test.mjs
+npm run lint && npm run format:check
+npm test
 npm run build
 ```
 
@@ -308,7 +314,7 @@ UI acceptance uses disposable loopback SFTP fixtures, including upload and long 
 
 ## Update an existing installation
 
-Back up the database and protect the existing `.env` first. Keep `JWT_SECRET` unchanged: saved encrypted credentials depend on it. From the same checkout and Compose project used for installation:
+Back up the database and protect the existing `.env` first. Keep `JWT_SECRET` unchanged: saved encrypted credentials depend on it unless you have moved to `ENCRYPTION_KEY`. Read [CHANGELOG.md](CHANGELOG.md) for changes that need action — version 1.4.0 requires the Windows worker to be updated and paired again over HTTPS. From the same checkout and Compose project used for installation:
 
 ```bash
 git pull --ff-only
@@ -330,11 +336,13 @@ Reload the panel after the build (⌘R in RSAT.app). UI-only changes do not requ
 
 ## Suggested next additions (not implemented)
 
+0. **Organizational sign-in (OIDC/SAML) with MFA**, mapping directory groups to panel roles, and per-operator directory credentials so DC logs name the acting person.
 1. **SSH keys and SSH-agent authentication**, with per-host identity selection, to complement password authentication.
 2. **Resumable transfers and directory synchronization**, with previews, conflict handling and independent remote checksum verification.
 3. **Linux operations dashboard** for service status, resource usage and searchable logs, followed by explicitly authorized service actions.
 4. **Bulk AD/DNS changes with a dry-run preview**, CSV validation and an audit-linked change report before applying writes.
-5. **Backup/restore and access management**: verified configuration/database recovery, organizational SSO/MFA and more granular operator permissions.
+5. **Backup/restore**: verified configuration/database recovery, and more granular operator permissions.
+6. **Direct-mode parity**: user creation, computer-account reset, Recycle Bin restore and GPO linking over LDAP, without the Windows worker.
 
 These are a roadmap, not current guarantees. Server actions and bulk changes should preserve the existing host-key checks, delegated rights and audit trail.
 

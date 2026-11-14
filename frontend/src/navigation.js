@@ -1,0 +1,32 @@
+import {
+  Activity,
+  Computer,
+  FileClock,
+  Folder,
+  FolderTree,
+  Globe2,
+  Group,
+  Network,
+  Server,
+  ShieldCheck,
+  SlidersHorizontal,
+  Terminal,
+  Users,
+} from 'lucide-react';
+
+export const nav = [
+  ['overview', '1', 'Overview', Activity],
+  ['domain', '2', 'Domain / Forest', Server],
+  ['users', '3', 'Users', Users],
+  ['groups', '4', 'Groups', Group],
+  ['computers', '5', 'Computers', Computer],
+  ['ous', '6', 'Organizational Units', FolderTree],
+  ['dns', '7', 'DNS', Globe2],
+  ['dhcp', '8', 'DHCP', Network],
+  ['gpo', '9', 'Group Policy', ShieldCheck],
+  ['audit', '0', 'Audit Log', FileClock],
+  ['ssh', 'H', 'SSH Switches', Terminal],
+  ['linux', 'L', 'Linux Servers', Server],
+  ['files', 'F', 'File Transfer', Folder],
+  ['settings', 'S', 'Settings', SlidersHorizontal],
+];
