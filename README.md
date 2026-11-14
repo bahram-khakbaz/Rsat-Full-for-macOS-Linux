@@ -1,8 +1,8 @@
 # RSAT Full for macOS & Linux
 
-![RSAT administration interface with synthetic example.local demo data](docs/images/rsat-demo-interface.png)
+![RSAT native macOS app with synthetic example.local demo data](docs/images/rsat-demo-interface.png)
 
-*Demo environment with synthetic data only.*
+*Native macOS app, captured in an isolated demo environment with synthetic data only.*
 
 A cross-platform administration center for Microsoft Active Directory environments, designed to make the daily ADAC / ADUC / DNS / DHCP / Group Policy workflow usable from macOS and Linux.
 
