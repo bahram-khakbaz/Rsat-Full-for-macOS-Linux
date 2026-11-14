@@ -1,5 +1,9 @@
 # RSAT Full for macOS & Linux
 
+![RSAT administration interface with synthetic example.local demo data](docs/images/rsat-demo-interface.png)
+
+*Demo environment with synthetic data only.*
+
 A cross-platform administration center for Microsoft Active Directory environments, designed to make the daily ADAC / ADUC / DNS / DHCP / Group Policy workflow usable from macOS and Linux.
 
 The control plane and UI run on macOS/Linux. Direct mode connects to Active Directory using LDAPS and manages DNS/DHCP through encrypted Kerberos RPC, without a Windows intermediary. An optional Windows worker supports additional RSAT and Group Policy operations.
